@@ -21,6 +21,10 @@ fi
 # Working directory container içinde host_mount/$REPO_NAME olacak
 docker run -it --rm \
     $GPU_FLAG \
+    --privileged \
+    -v /dev:/dev \
+    -v /dev/bus/usb:/dev/bus/usb \
+    --group-add video \
     -v "$PARENT_DIR:/host_mount" \
     -w "/host_mount/$REPO_NAME" \
     usta_pose_models:latest \
