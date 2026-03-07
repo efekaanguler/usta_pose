@@ -27,6 +27,7 @@ Usage:
 
 import argparse
 import cv2
+import h5py
 import numpy as np
 import pyrealsense2 as rs
 import os
@@ -66,13 +67,17 @@ class CameraThread:
         self.recording = False
         self._barrier_passed = False  # True once this thread has passed the barrier
         self.video_writer = None
-        self.depth_dir = None
+        self.cam_dir = None       # per-camera subdirectory inside session_dir
         self.session_dir = None
         self.frame_count = 0
         self.timestamps = []  # host-clock timestamps (ms) per recorded frame
 
+        # HDF5 depth storage (single resizable dataset, one frame at a time)
+        self._depth_h5 = None
+        self._depth_dataset = None
+
         # Writer thread: decouples disk I/O from the capture loop so that
-        # slow cv2.imwrite / VideoWriter.write never block frame capture.
+        # slow VideoWriter.write / h5py append never block frame capture.
         self._write_queue = None
         self._writer_thread = None
 
@@ -237,10 +242,12 @@ class CameraThread:
                 self.frame_queue.put_nowait((color_image, depth_image))
 
     def _writer_loop(self):
-        """Disk I/O thread — writes video frames and depth NPY files.
+        """Disk I/O thread — writes video frames and depth into HDF5.
 
-        Runs in a separate thread so that np.save and VideoWriter.write never
-        block the capture loop.
+        Runs in a separate thread so that VideoWriter.write and h5py appends
+        never block the capture loop.  Depth frames are appended one at a time
+        to a resizable dataset; RAM usage stays constant regardless of session
+        length.
         """
         while True:
             item = self._write_queue.get()
@@ -252,14 +259,15 @@ class CameraThread:
             if self.video_writer is not None:
                 self.video_writer.write(color_image)
 
-            if depth_image is not None and self.depth_dir is not None:
-                depth_path = os.path.join(
-                    self.depth_dir, f"frame_{frame_idx:06d}.npy")
+            if depth_image is not None and self._depth_dataset is not None:
                 if self.depth_scale is not None:
                     depth_metric = depth_image.astype(np.float32) * self.depth_scale
                 else:
                     depth_metric = depth_image.astype(np.float32)
-                np.save(depth_path, depth_metric)
+                # Append one frame: resize axis-0 by 1, then write
+                n = self._depth_dataset.shape[0]
+                self._depth_dataset.resize(n + 1, axis=0)
+                self._depth_dataset[n] = depth_metric
 
     def prepare_recording(self, session_dir):
         """Set up writers and directories, but don't start recording yet.
@@ -270,16 +278,33 @@ class CameraThread:
         self.session_dir = session_dir
         cam_name = f"cam{self.cam_idx + 1}"
 
+        # Per-camera subdirectory
+        self.cam_dir = os.path.join(session_dir, cam_name)
+        os.makedirs(self.cam_dir, exist_ok=True)
+
         # Video writer
-        video_path = os.path.join(session_dir, f"{cam_name}_color.mp4")
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        video_path = os.path.join(self.cam_dir, "color.mp4")
+        fourcc = cv2.VideoWriterGemini_fourcc(*'mp4v')
         self.video_writer = cv2.VideoWriter(video_path, fourcc, self.fps,
                                             (self.width, self.height))
 
-        # Depth directory
+        # Depth HDF5 file with a resizable dataset — no per-frame files needed
         if self.enable_depth:
-            self.depth_dir = os.path.join(session_dir, f"{cam_name}_depth")
-            os.makedirs(self.depth_dir, exist_ok=True)
+            depth_h5_path = os.path.join(self.cam_dir, "depth.h5")
+            self._depth_h5 = h5py.File(depth_h5_path, 'w')
+            self._depth_dataset = self._depth_h5.create_dataset(
+                'depth',
+                shape=(0, self.height, self.width),
+                maxshape=(None, self.height, self.width),
+                dtype=np.float32,
+                chunks=(1, self.height, self.width),  # one chunk = one frame
+                compression='lzf',   # fast lossless compression (lzf >> gzip for speed)
+            )
+            self._depth_h5.attrs['unit'] = 'meters'
+            self._depth_h5.attrs['dtype'] = 'float32'
+            self._depth_h5.attrs['source_stream_format'] = 'z16'
+            self._depth_h5.attrs['depth_scale_meters_per_unit'] = self.depth_scale or 0.0
+            self._depth_h5.attrs['cam_idx'] = self.cam_idx + 1
 
         self.frame_count = 0
         self.timestamps = []
@@ -307,11 +332,23 @@ class CameraThread:
             self.video_writer.release()
             self.video_writer = None
 
-        # Save per-frame timestamps
-        if self.timestamps and self.session_dir is not None:
-            cam_name = f"cam{self.cam_idx + 1}"
-            ts_path = os.path.join(self.session_dir, f"{cam_name}_timestamps.npy")
-            np.save(ts_path, np.array(self.timestamps, dtype=np.float64))
+        # Close depth HDF5 file (all frames already written by writer thread)
+        if self._depth_h5 is not None:
+            self._depth_h5.close()
+            self._depth_h5 = None
+            self._depth_dataset = None
+
+        # Save per-frame timestamps as HDF5
+        if self.timestamps and self.cam_dir is not None:
+            ts_path = os.path.join(self.cam_dir, "timestamps.h5")
+            ts_array = np.array(self.timestamps, dtype=np.float64)
+            with h5py.File(ts_path, 'w') as hf:
+                ds = hf.create_dataset('timestamps', data=ts_array)
+                ds.attrs['cam_idx'] = self.cam_idx + 1
+                ds.attrs['source'] = 'backend_timestamp'
+                ds.attrs['unit'] = 'milliseconds'
+                ds.attrs['dtype'] = 'float64'
+                ds.attrs['frame_count'] = len(ts_array)
 
         frame_count = self.frame_count
         self.timestamps = []
@@ -457,10 +494,17 @@ def main(args):
                 'calibration': cam.calibration_data,
                 'frame_count': frame_counts[i + 1],
                 'timestamp_source': 'backend_timestamp',
+                'timestamp_file_format': 'hdf5',
+                'timestamp_file': f"cam{i + 1}/timestamps.h5",
+                'timestamp_dataset': 'timestamps',
                 'depth_storage': {
-                    'format': 'npy',
+                    'format': 'hdf5',
+                    'file': f"cam{i + 1}/depth.h5",
+                    'dataset': 'depth',
+                    'shape': '(N, height, width)',
                     'dtype': 'float32',
                     'unit': 'meters',
+                    'compression': 'lzf',
                     'source_stream_format': 'z16',
                     'depth_scale_meters_per_unit': cam.depth_scale,
                 },
