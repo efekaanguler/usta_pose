@@ -215,12 +215,10 @@ class CameraThread:
 
             # Record if active — hand off to writer thread (no I/O here)
             if self.recording:
-                # Use backend_timestamp (host-clock ms) — comparable across
-                # cameras without needing global_time_enabled.
-                if color_frame.supports_frame_metadata(rs.frame_metadata_value.backend_timestamp):
-                    ts = color_frame.get_frame_metadata(rs.frame_metadata_value.backend_timestamp)
-                else:
-                    ts = color_frame.get_timestamp()
+                # Use time.perf_counter() for sub-millisecond precision.
+                # backend_timestamp gives only integer ms (33.0, 34.0 etc.)
+                # which hides the real jitter between frames.
+                ts = time.perf_counter() * 1000.0  # ms with µs precision
 
                 # Enqueue for the writer thread; drop frame if queue full
                 if self._write_queue is not None:
@@ -339,20 +337,21 @@ class CameraThread:
             self._depth_dataset = None
 
         # Save per-frame timestamps as HDF5
-        if self.timestamps and self.cam_dir is not None:
+        timestamps_copy = list(self.timestamps)
+        if timestamps_copy and self.cam_dir is not None:
             ts_path = os.path.join(self.cam_dir, "timestamps.h5")
-            ts_array = np.array(self.timestamps, dtype=np.float64)
+            ts_array = np.array(timestamps_copy, dtype=np.float64)
             with h5py.File(ts_path, 'w') as hf:
                 ds = hf.create_dataset('timestamps', data=ts_array)
                 ds.attrs['cam_idx'] = self.cam_idx + 1
-                ds.attrs['source'] = 'backend_timestamp'
+                ds.attrs['source'] = 'perf_counter'
                 ds.attrs['unit'] = 'milliseconds'
                 ds.attrs['dtype'] = 'float64'
                 ds.attrs['frame_count'] = len(ts_array)
 
         frame_count = self.frame_count
         self.timestamps = []
-        return frame_count
+        return frame_count, timestamps_copy
 
     def stop(self):
         """Stop capture thread and release pipeline."""
@@ -372,6 +371,131 @@ class CameraThread:
         except queue.Empty:
             pass
         return frame
+
+
+def generate_frame_timing_report(session_dir, all_timestamps, target_fps, roles):
+    """Generate human-readable frame-timing diagnostics for all cameras.
+
+    Creates two files in *session_dir*:
+        frame_timing_report.csv  – per-frame data (cam, frame_idx, timestamp_ms, delta_ms)
+        frame_timing_summary.json – aggregate statistics per camera
+
+    Parameters
+    ----------
+    session_dir : str
+        Directory of the current recording session.
+    all_timestamps : dict[int, list[float]]
+        Mapping cam_id (1-based) → list of backend_timestamps in milliseconds.
+    target_fps : int
+        Desired frame rate (e.g. 30).
+    roles : list[str]
+        Per-camera role labels (e.g. ['pose', 'pose', 'gaze', 'gaze']).
+    """
+    import csv
+
+    expected_interval_ms = 1000.0 / target_fps  # e.g. 33.33 ms for 30 fps
+    # Thresholds for anomaly detection
+    drop_threshold_ms = expected_interval_ms * 1.6   # >60% longer → likely dropped frame
+    dup_threshold_ms = expected_interval_ms * 0.4     # <40% of expected → likely duplicate
+
+    csv_path = os.path.join(session_dir, "frame_timing_report.csv")
+    summary = {}
+
+    with open(csv_path, "w", newline="", encoding="utf-8-sig") as csvfile:
+        writer = csv.writer(csvfile, delimiter=";")
+        writer.writerow([
+            "camera", "role", "frame_idx", "timestamp_ms",
+            "delta_ms", "flag"
+        ])
+
+        for cam_id in sorted(all_timestamps.keys()):
+            # Force float so deltas are always fractional, never integer
+            ts_list = [float(t) for t in all_timestamps[cam_id]]
+            role = roles[cam_id - 1] if cam_id - 1 < len(roles) else "unknown"
+
+            if len(ts_list) < 2:
+                # Not enough frames for meaningful analysis
+                writer.writerow([f"cam{cam_id}", role, 0,
+                                 ts_list[0] if ts_list else "", "", ""])
+                summary[f"cam{cam_id}"] = {
+                    "role": role,
+                    "total_frames": len(ts_list),
+                    "note": "Not enough frames for interval analysis"
+                }
+                continue
+
+            deltas = []
+            drop_count = 0
+            dup_count = 0
+
+            for i, t in enumerate(ts_list):
+                if i == 0:
+                    writer.writerow([f"cam{cam_id}", role, i, round(t, 3), "", ""])
+                else:
+                    delta = float(t - ts_list[i - 1])
+                    deltas.append(delta)
+
+                    flag = ""
+                    if delta > drop_threshold_ms:
+                        flag = "LATE"
+                        drop_count += 1
+                    elif delta < dup_threshold_ms:
+                        flag = "FAST"
+                        dup_count += 1
+
+                    writer.writerow([
+                        f"cam{cam_id}", role, i, round(t, 3),
+                        round(delta, 3), flag
+                    ])
+
+            deltas_arr = np.array(deltas)
+            actual_mean = float(np.mean(deltas_arr))
+            actual_std = float(np.std(deltas_arr))
+            actual_min = float(np.min(deltas_arr))
+            actual_max = float(np.max(deltas_arr))
+
+            actual_fps = 1000.0 / actual_mean if actual_mean > 0 else 0.0
+            duration_s = (ts_list[-1] - ts_list[0]) / 1000.0
+
+            summary[f"cam{cam_id}"] = {
+                "role": role,
+                "total_frames": len(ts_list),
+                "duration_seconds": round(duration_s, 3),
+                "target_fps": target_fps,
+                "expected_interval_ms": round(expected_interval_ms, 3),
+                "actual_fps_avg": round(actual_fps, 3),
+                "interval_mean_ms": round(actual_mean, 3),
+                "interval_std_ms": round(actual_std, 3),
+                "interval_min_ms": round(actual_min, 3),
+                "interval_max_ms": round(actual_max, 3),
+                "jitter_ms": round(actual_std, 3),
+                "late_frames (delta > {:.1f}ms)".format(drop_threshold_ms): drop_count,
+                "fast_frames (delta < {:.1f}ms)".format(dup_threshold_ms): dup_count,
+            }
+
+    # Write summary JSON
+    summary_path = os.path.join(session_dir, "frame_timing_summary.json")
+    with open(summary_path, "w") as f:
+        json.dump(summary, f, indent=2, ensure_ascii=False)
+
+    print(f"Frame timing report saved → {csv_path}")
+    print(f"Frame timing summary saved → {summary_path}")
+
+    # Print a quick console overview
+    print("\n╔══════════════ FRAME TIMING SUMMARY ══════════════╗")
+    for cam_key in sorted(summary.keys()):
+        s = summary[cam_key]
+        if "note" in s:
+            print(f"║ {cam_key} ({s['role']}): {s['note']}")
+            continue
+        print(f"║ {cam_key} ({s['role']}): "
+              f"{s['total_frames']} frames | "
+              f"avg {s['actual_fps_avg']:.1f} fps | "
+              f"interval {s['interval_mean_ms']:.1f}±{s['interval_std_ms']:.1f} ms | "
+              f"min {s['interval_min_ms']:.1f} max {s['interval_max_ms']:.1f} ms | "
+              f"late:{s.get(list(k for k in s if k.startswith('late'))[0], 0)} "
+              f"fast:{s.get(list(k for k in s if k.startswith('fast'))[0], 0)}")
+    print("╚══════════════════════════════════════════════════╝\n")
 
 
 def main(args):
@@ -474,9 +598,11 @@ def main(args):
             pass
 
         frame_counts = {}
+        all_timestamps = {}  # cam_idx+1 -> list of timestamps (ms)
         for cam in cameras:
-            fc = cam.stop_recording()
+            fc, ts = cam.stop_recording()
             frame_counts[cam.cam_idx + 1] = fc
+            all_timestamps[cam.cam_idx + 1] = ts
 
         metadata = {
             'session_start': session_start_time.isoformat(),
@@ -493,7 +619,7 @@ def main(args):
                 'intrinsics': cam.intrinsics_data,
                 'calibration': cam.calibration_data,
                 'frame_count': frame_counts[i + 1],
-                'timestamp_source': 'backend_timestamp',
+                'timestamp_source': 'perf_counter',
                 'timestamp_file_format': 'hdf5',
                 'timestamp_file': f"cam{i + 1}/timestamps.h5",
                 'timestamp_dataset': 'timestamps',
@@ -514,6 +640,11 @@ def main(args):
         metadata_path = os.path.join(session_dir, 'metadata.json')
         with open(metadata_path, 'w') as f:
             json.dump(metadata, f, indent=2)
+
+        # --- Frame timing diagnostics ---
+        generate_frame_timing_report(
+            session_dir, all_timestamps, args.fps, roles
+        )
 
         is_recording = False
         print(f"Recording stopped. Frames: {frame_counts}")
