@@ -8,10 +8,10 @@ Records color video + depth frames from 4 RealSense cameras:
 
 Output structure:
     recordings/session_YYYYMMDD_HHMMSS/
-        cam1_color.mp4       cam1_depth/frame_NNNNNN.npy  (float32, meters)
-        cam2_color.mp4       cam2_depth/...
-        cam3_color.mp4       cam3_depth/...
-        cam4_color.mp4       cam4_depth/...
+        cam1/color.mp4       cam1/depth.h5  (uint16 z16)
+        cam2/color.mp4       cam2/depth.h5
+        cam3/color.mp4       cam3/depth.h5
+        cam4/color.mp4       cam4/depth.h5
         metadata.json
 
 Controls:
@@ -42,13 +42,27 @@ from pathlib import Path
 class CameraThread:
     """Manages a single RealSense camera in its own capture thread."""
 
-    def __init__(self, cam_idx, serial, width, height, fps, enable_depth=True):
+    def __init__(
+        self,
+        cam_idx,
+        serial,
+        width,
+        height,
+        fps,
+        enable_depth=True,
+        align_depth_live=False,
+        depth_compression='lzf',
+        depth_gzip_level=1,
+    ):
         self.cam_idx = cam_idx
         self.serial = serial
         self.width = width
         self.height = height
         self.fps = fps
         self.enable_depth = enable_depth
+        self.align_depth_live = bool(align_depth_live and enable_depth)
+        self.depth_compression = depth_compression
+        self.depth_gzip_level = int(depth_gzip_level)
 
         self.pipeline = None
         self.align = None
@@ -80,6 +94,23 @@ class CameraThread:
         # slow VideoWriter.write / h5py append never block frame capture.
         self._write_queue = None
         self._writer_thread = None
+
+    def _get_depth_h5_options(self):
+        """Return h5py.create_dataset kwargs for depth compression mode."""
+        if self.depth_compression == 'none':
+            return {}
+        if self.depth_compression == 'lzf':
+            return {
+                'compression': 'lzf',
+                'shuffle': True,
+            }
+        if self.depth_compression == 'gzip':
+            return {
+                'compression': 'gzip',
+                'compression_opts': self.depth_gzip_level,
+                'shuffle': True,
+            }
+        raise ValueError(f"Unsupported depth compression: {self.depth_compression}")
 
     @staticmethod
     def _intrinsics_to_dict(intr):
@@ -120,9 +151,10 @@ class CameraThread:
             if sensor.supports(rs.option.auto_exposure_priority):
                 sensor.set_option(rs.option.auto_exposure_priority, 0)
 
-        # Align depth to color
+        # Optional live depth->color alignment (CPU-heavy for multi-cam setups)
         if self.enable_depth:
-            self.align = rs.align(rs.stream.color)
+            if self.align_depth_live:
+                self.align = rs.align(rs.stream.color)
             try:
                 depth_sensor = device.first_depth_sensor()
                 self.depth_scale = float(depth_sensor.get_depth_scale())
@@ -185,10 +217,14 @@ class CameraThread:
             except RuntimeError:
                 continue
 
-            if self.enable_depth and self.align:
-                aligned = self.align.process(frames)
-                color_frame = aligned.get_color_frame()
-                depth_frame = aligned.get_depth_frame()
+            if self.enable_depth:
+                if self.align is not None:
+                    aligned = self.align.process(frames)
+                    color_frame = aligned.get_color_frame()
+                    depth_frame = aligned.get_depth_frame()
+                else:
+                    color_frame = frames.get_color_frame()
+                    depth_frame = frames.get_depth_frame()
             else:
                 color_frame = frames.get_color_frame()
                 depth_frame = None
@@ -288,21 +324,27 @@ class CameraThread:
         if self.enable_depth:
             depth_h5_path = os.path.join(self.cam_dir, "depth.h5")
             self._depth_h5 = h5py.File(depth_h5_path, 'w')
+            h5_options = self._get_depth_h5_options()
             self._depth_dataset = self._depth_h5.create_dataset(
                 'depth',
                 shape=(0, self.height, self.width),
                 maxshape=(None, self.height, self.width),
                 dtype=np.uint16,
                 chunks=(1, self.height, self.width),
-                compression='gzip',
-                compression_opts=4,
-                shuffle=True,       # byte-shuffle before gzip → much better ratio on uint16
+                **h5_options,
             )
             self._depth_h5.attrs['unit'] = 'z16_raw'
             self._depth_h5.attrs['dtype'] = 'uint16'
             self._depth_h5.attrs['source_stream_format'] = 'z16'
             self._depth_h5.attrs['depth_scale_meters_per_unit'] = self.depth_scale or 0.0
             self._depth_h5.attrs['cam_idx'] = self.cam_idx + 1
+            self._depth_h5.attrs['aligned_to'] = 'color' if self.align_depth_live else 'depth'
+            self._depth_h5.attrs['alignment_mode'] = (
+                'live_realsense_align' if self.align_depth_live else 'none_raw_depth'
+            )
+            self._depth_h5.attrs['compression'] = self.depth_compression
+            if self.depth_compression == 'gzip':
+                self._depth_h5.attrs['compression_opts'] = self.depth_gzip_level
 
         self.frame_count = 0
         self.timestamps = []
@@ -499,6 +541,9 @@ def generate_frame_timing_report(session_dir, all_timestamps, target_fps, roles)
 
 
 def main(args):
+    if not (0 <= args.depth_gzip_level <= 9):
+        raise ValueError("--depth-gzip-level must be in [0, 9]")
+
     num_cameras = 4
     output_base = Path(args.output_dir)
     output_base.mkdir(parents=True, exist_ok=True)
@@ -527,6 +572,13 @@ def main(args):
     roles = ['pose', 'pose', 'gaze', 'gaze']
     for i in range(num_cameras):
         print(f"  Cam {i + 1} ({roles[i]}): {serials[i] or 'NOT FOUND'}")
+    print("Capture options:")
+    print(f"  Live depth alignment: {'ON (depth->color)' if args.align_depth_live else 'OFF (record raw depth)'}")
+    if args.depth_compression == 'gzip':
+        depth_comp_text = f"gzip(level={args.depth_gzip_level})"
+    else:
+        depth_comp_text = args.depth_compression
+    print(f"  Depth HDF5 compression: {depth_comp_text}")
 
     # Initialize camera threads
     cameras = []
@@ -535,7 +587,16 @@ def main(args):
             print(f"Error: No serial for camera {i + 1}. Add it to {args.cam_config}")
             return
 
-        cam = CameraThread(i, serials[i], args.width, args.height, args.fps)
+        cam = CameraThread(
+            i,
+            serials[i],
+            args.width,
+            args.height,
+            args.fps,
+            align_depth_live=args.align_depth_live,
+            depth_compression=args.depth_compression,
+            depth_gzip_level=args.depth_gzip_level,
+        )
         cameras.append(cam)
 
     # Shared synchronization primitives for recording
@@ -630,10 +691,17 @@ def main(args):
                     'shape': '(N, height, width)',
                     'dtype': 'uint16',
                     'unit': 'z16_raw',
-                    'compression': 'gzip_level4_shuffle',
+                    'compression': cam.depth_compression,
+                    'compression_opts': cam.depth_gzip_level if cam.depth_compression == 'gzip' else None,
                     'source_stream_format': 'z16',
+                    'aligned_to': 'color' if cam.align_depth_live else 'depth',
+                    'alignment_mode': 'live_realsense_align' if cam.align_depth_live else 'none_raw_depth',
                     'depth_scale_meters_per_unit': cam.depth_scale,
-                    'note': 'depth_meters = data.astype(float32) * depth_scale',
+                    'note': (
+                        'depth_meters = data.astype(float32) * depth_scale; '
+                        'if alignment_mode=none_raw_depth run devel/align_depth_postprocess.py '
+                        'to generate depth_aligned_to_color.h5'
+                    ),
                 },
             }
 
@@ -769,6 +837,27 @@ if __name__ == '__main__':
     parser.add_argument('--width', type=int, default=640, help='Frame width')
     parser.add_argument('--height', type=int, default=480, help='Frame height')
     parser.add_argument('--fps', type=int, default=15, help='Frames per second')
+    parser.add_argument(
+        '--align-depth-live',
+        action='store_true',
+        help=(
+            'Align depth to color during capture. This increases CPU load; '
+            'default is OFF (record raw depth and align in post-process).'
+        ),
+    )
+    parser.add_argument(
+        '--depth-compression',
+        type=str,
+        default='lzf',
+        choices=['none', 'lzf', 'gzip'],
+        help='Compression mode for depth.h5. "none" is fastest but largest.',
+    )
+    parser.add_argument(
+        '--depth-gzip-level',
+        type=int,
+        default=1,
+        help='Gzip level (0-9) when --depth-compression=gzip.',
+    )
     parser.add_argument('--no-gui', action='store_true',
                         help='Run without OpenCV windows (headless mode)')
 

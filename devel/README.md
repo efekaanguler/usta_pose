@@ -1,1 +1,0 @@
-# Pipeline ve testing için kullanılabilecek folder
