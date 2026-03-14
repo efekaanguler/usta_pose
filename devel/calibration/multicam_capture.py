@@ -100,7 +100,10 @@ class MulticamCaptureApp:
 
         self.detector_params = cv2.aruco.DetectorParameters()
         self.detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
-        self.charuco_detector = cv2.aruco.CharucoDetector(self.board, detectorParams=self.detector_params)
+        self.charuco_detector = cv2.aruco.CharucoDetector(
+            self.board, cv2.aruco.CharucoParameters(),
+            self.detector_params, cv2.aruco.RefineParameters()
+        )
 
         print(f"ChArUco Board Configuration:")
         print(f"  Squares: {self.args.squares_x} x {self.args.squares_y}")
@@ -145,15 +148,42 @@ class MulticamCaptureApp:
         for i, s in enumerate(self.serials):
             print(f"  Camera {self.camera_ids[i]}: {s}")
 
+        # Resolution/FPS fallback options for USB 2.0 compatibility
+        stream_configs = [
+            (self.args.width, self.args.height, self.args.fps),
+            (self.args.width, self.args.height, 15),
+            (self.args.width, self.args.height, 6),
+            (848, 480, 30),
+            (848, 480, 15),
+            (640, 480, 30),
+            (640, 480, 15),
+            (640, 480, 6),
+        ]
+
         # Start pipelines
         self.pipelines = []
         for i, serial in enumerate(self.serials):
             pipe = rs.pipeline()
-            cfg = rs.config()
-            cfg.enable_device(serial)
-            cfg.enable_stream(rs.stream.color, self.args.width, self.args.height,
-                              rs.format.bgr8, self.args.fps)
-            pipe.start(cfg)
+            started = False
+            for w, h, fps in stream_configs:
+                try:
+                    cfg = rs.config()
+                    cfg.enable_device(serial)
+                    cfg.enable_stream(rs.stream.color, w, h, rs.format.bgr8, fps)
+                    print(f"  Camera {self.camera_ids[i]} ({serial}): {w}x{h}@{fps}...", end=" ")
+                    pipe.start(cfg)
+                    print("OK")
+                    started = True
+                    break
+                except RuntimeError:
+                    print("FAILED")
+                    try:
+                        pipe.stop()
+                    except:
+                        pass
+                    pipe = rs.pipeline()
+            if not started:
+                raise RuntimeError(f"Could not start camera {serial} at any resolution")
             self.pipelines.append(pipe)
 
         # Warm up
@@ -262,7 +292,7 @@ class MulticamCaptureApp:
         print(f"\nPress Q to quit")
         print(f"{'=' * 60}\n")
 
-        min_corners = max(4, int(0.3 * (self.args.squares_x - 1) * (self.args.squares_y - 1)))
+        min_corners = (self.args.squares_x - 1) * (self.args.squares_y - 1)  # require all corners
 
         window_name = "Multi-Camera ChArUco Capture (Q to quit)"
         cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
@@ -312,7 +342,7 @@ class MulticamCaptureApp:
                         if self.countdown_start_time is None:
                             self.countdown_start_time = current_time
 
-                        countdown_duration = 3
+                        countdown_duration = 1
                         time_in_countdown = current_time - self.countdown_start_time
                         time_remaining = countdown_duration - time_in_countdown
 
@@ -442,6 +472,8 @@ def main():
     # Capture mode
     parser.add_argument('--auto-capture', action='store_true',
                         help='Enable automatic capture with countdown')
+    parser.add_argument('--capture-interval', type=float, default=4.0,
+                        help='Seconds between auto-captures')
 
     # ChArUco board parameters
     parser.add_argument('--squares-x', type=int, default=3,

@@ -284,7 +284,7 @@ class CameraThread:
 
         # Video writer
         video_path = os.path.join(self.cam_dir, "color.mp4")
-        fourcc = cv2.VideoWriterGemini_fourcc(*'mp4v')
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         self.video_writer = cv2.VideoWriter(video_path, fourcc, self.fps,
                                             (self.width, self.height))
 

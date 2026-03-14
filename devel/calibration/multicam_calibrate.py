@@ -80,7 +80,10 @@ class MulticamCalibrator:
 
         self.detector_params = cv2.aruco.DetectorParameters()
         self.detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
-        self.charuco_detector = cv2.aruco.CharucoDetector(self.board, detectorParams=self.detector_params)
+        self.charuco_detector = cv2.aruco.CharucoDetector(
+            self.board, cv2.aruco.CharucoParameters(),
+            self.detector_params, cv2.aruco.RefineParameters()
+        )
 
         print(f"ChArUco Board: {self.args.squares_x} x {self.args.squares_y}, "
               f"square={self.args.square_length}m, marker={self.args.marker_length}m")

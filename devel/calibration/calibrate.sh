@@ -29,8 +29,8 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # BOARD PARAMETRELERİ  (her yerde aynı board kullanılmalı)
 # ---------------------------------------------------------------------------
-SQUARES_X=3
-SQUARES_Y=4
+SQUARES_X=4
+SQUARES_Y=3
 SQUARE_LENGTH=0.063      # metre
 MARKER_LENGTH=0.047      # metre
 ARUCO_DICT="4X4_50"
@@ -91,8 +91,8 @@ die()  { echo -e "\033[1;31m  ✗ $*\033[0m"; exit 1; }
 
 # Kullanıcıdan onay bekle
 confirm() {
-    local msg="${1:-Devam etmek için Enter'a basın...}"
-    read -rp "$(echo -e "\033[0;33m  → ${msg}\033[0m") " _
+    local msg="${1:-Devam etmek için Enter\'a basın...}"
+    read -rp "$(echo -e "\033[0;33m  → ${msg}\033[0m")"
 }
 
 python_cmd() {

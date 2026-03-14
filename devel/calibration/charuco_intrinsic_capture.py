@@ -74,24 +74,71 @@ class CharucoIntrinsicCaptureApp:
         aruco_dict_id = aruco_dict_map.get(self.args.aruco_dict, cv2.aruco.DICT_4X4_50)
         self.aruco_dict = cv2.aruco.getPredefinedDictionary(aruco_dict_id)
 
-        self.board = cv2.aruco.CharucoBoard(
-            (self.args.squares_x, self.args.squares_y),
-            self.args.square_length,
-            self.args.marker_length,
-            self.aruco_dict
-        )
-
-        self.detector_params = cv2.aruco.DetectorParameters()
-        self.detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
-        self.charuco_detector = cv2.aruco.CharucoDetector(self.board, detectorParams=self.detector_params)
+        self._board_config_locked = False
+        self._build_board_and_detector(self.args.squares_x, self.args.squares_y, False)
 
         print(f"ChArUco Board Configuration:")
-        print(f"  Squares: {self.args.squares_x} × {self.args.squares_y}")
+        print(f"  Squares: {self.args.squares_x} x {self.args.squares_y}")
         print(f"  Square size: {self.args.square_length * 1000:.1f} mm")
         print(f"  Marker size: {self.args.marker_length * 1000:.1f} mm")
         print(f"  Dictionary: {self.args.aruco_dict}")
         print(f"  Total corners: {(self.args.squares_x-1) * (self.args.squares_y-1)}")
-        print(f"\nIMPORTANT: Verify these parameters match your printed board!")
+
+    def _build_board_and_detector(self, sx, sy, legacy):
+        """Build a CharucoBoard + CharucoDetector."""
+        self.board = cv2.aruco.CharucoBoard(
+            (sx, sy),
+            self.args.square_length,
+            self.args.marker_length,
+            self.aruco_dict
+        )
+        if legacy:
+            self.board.setLegacyPattern(True)
+        self.detector_params = cv2.aruco.DetectorParameters()
+        self.detector_params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+        self.charuco_params = cv2.aruco.CharucoParameters()
+        self.refine_params = cv2.aruco.RefineParameters()
+        self.charuco_detector = cv2.aruco.CharucoDetector(
+            self.board, self.charuco_params, self.detector_params, self.refine_params
+        )
+
+    def _auto_detect_board_config(self, gray):
+        """Try all 4 combinations of (sx,sy) x (legacy,non-legacy)."""
+        sx = self.args.squares_x
+        sy = self.args.squares_y
+        combos = [
+            (sx, sy, False, f"{sx}x{sy} non-legacy"),
+            (sx, sy, True,  f"{sx}x{sy} legacy"),
+            (sy, sx, False, f"{sy}x{sx} non-legacy (swapped)"),
+            (sy, sx, True,  f"{sy}x{sx} legacy (swapped)"),
+        ]
+        print(f"\nAUTO-DETECTING BOARD CONFIGURATION...")
+        for sx_try, sy_try, legacy, label in combos:
+            board = cv2.aruco.CharucoBoard(
+                (sx_try, sy_try),
+                self.args.square_length,
+                self.args.marker_length,
+                self.aruco_dict
+            )
+            if legacy:
+                board.setLegacyPattern(True)
+            dp = cv2.aruco.DetectorParameters()
+            dp.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_SUBPIX
+            cp = cv2.aruco.CharucoParameters()
+            rp = cv2.aruco.RefineParameters()
+            detector = cv2.aruco.CharucoDetector(board, cp, dp, rp)
+            corners, ids, mcorners, mids = detector.detectBoard(gray)
+            n_markers = 0 if mids is None else len(mids)
+            n_corners = 0 if corners is None else len(corners)
+            status = "CORNERS FOUND" if n_corners > 0 else "no corners"
+            print(f"  {label:30s} -> markers={n_markers}, corners={n_corners}  {status}")
+            if n_corners > 0:
+                print(f"  WINNER: {label} (squares_x={sx_try}, squares_y={sy_try}, legacy={legacy})")
+                self._build_board_and_detector(sx_try, sy_try, legacy)
+                self._board_config_locked = True
+                return True
+        print(f"  None of the 4 combinations produced corners!")
+        return False
 
     def setup_camera(self):
         """Initialize single RealSense camera"""
@@ -119,16 +166,45 @@ class CharucoIntrinsicCaptureApp:
 
         print(f"\nUsing camera: {self.serial} (Camera {self.args.camera_id})")
 
-        # Configure and start pipeline
+        # Configure and start pipeline (with USB 2.0 fallback)
         self.pipeline = rs.pipeline()
-        config = rs.config()
-        config.enable_device(self.serial)
-        config.enable_stream(rs.stream.color, self.args.width, self.args.height,
-                           rs.format.bgr8, self.args.fps)
 
-        # Start streaming
-        print(f"Starting camera stream ({self.args.width}x{self.args.height} @ {self.args.fps} FPS)...")
-        self.pipeline.start(config)
+        # Resolution/FPS options: try highest first, fall back for USB 2.0
+        stream_configs = [
+            (self.args.width, self.args.height, self.args.fps),
+            (self.args.width, self.args.height, 15),
+            (self.args.width, self.args.height, 6),
+            (848, 480, 30),
+            (848, 480, 15),
+            (640, 480, 30),
+            (640, 480, 15),
+            (640, 480, 6),
+        ]
+
+        started = False
+        for w, h, fps in stream_configs:
+            try:
+                config = rs.config()
+                config.enable_device(self.serial)
+                config.enable_stream(rs.stream.color, w, h, rs.format.bgr8, fps)
+                print(f"Trying {w}x{h} @ {fps} FPS...", end=" ")
+                self.pipeline.start(config)
+                print("OK")
+                self.actual_width = w
+                self.actual_height = h
+                self.actual_fps = fps
+                started = True
+                break
+            except RuntimeError:
+                print("FAILED (bandwidth?)")
+                try:
+                    self.pipeline.stop()
+                except:
+                    pass
+                self.pipeline = rs.pipeline()
+
+        if not started:
+            raise RuntimeError(f"Could not start camera {self.serial} at any resolution")
 
         # Wait for camera to stabilize
         print("Warming up camera...")
@@ -138,10 +214,20 @@ class CharucoIntrinsicCaptureApp:
         print("Camera ready!")
 
     def detect_charuco(self, image):
-        """Detect ChArUco board in image"""
+        """Detect ChArUco board in image."""
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        charuco_corners, charuco_ids, marker_corners, marker_ids = self.charuco_detector.detectBoard(gray)
 
+        # Auto-detect board config on first frame with visible markers
+        if not self._board_config_locked:
+            corners_tmp, ids_tmp, mc_tmp, mi_tmp = self.charuco_detector.detectBoard(gray)
+            has_markers = mi_tmp is not None and len(mi_tmp) >= 3
+            has_corners = corners_tmp is not None and len(corners_tmp) > 0
+            if has_markers and not has_corners:
+                self._auto_detect_board_config(gray)
+            elif has_corners:
+                self._board_config_locked = True
+
+        charuco_corners, charuco_ids, marker_corners, marker_ids = self.charuco_detector.detectBoard(gray)
         detected_image = image.copy()
 
         if marker_ids is not None and len(marker_ids) > 0:
@@ -153,11 +239,10 @@ class CharucoIntrinsicCaptureApp:
         if charuco_corners is not None and len(charuco_corners) > 0:
             num_corners = len(charuco_corners)
             cv2.aruco.drawDetectedCornersCharuco(detected_image, charuco_corners, charuco_ids)
-            print(f"DEBUG: Detected {num_corners} ChArUco corners from {num_markers} markers")
             return charuco_corners, charuco_ids, detected_image, num_corners, num_markers
         else:
-            print(f"DEBUG: No corners detected. Markers: {num_markers}, charuco_corners type: {type(charuco_corners)}, value: {charuco_corners}")
             return None, None, detected_image, 0, num_markers
+
 
     def create_info_overlay(self, image, num_corners, num_markers, is_good=False):
         """Add information overlay to image"""
@@ -312,7 +397,7 @@ class CharucoIntrinsicCaptureApp:
 
                 corners, ids, detected, num_corners, num_markers = self.detect_charuco(image)
 
-                min_corners = max(3, int(0.25 * (self.args.squares_x-1) * (self.args.squares_y-1)))
+                min_corners = (self.args.squares_x - 1) * (self.args.squares_y - 1)  # require all corners
                 is_good = corners is not None and num_corners >= min_corners
 
                 display = self.create_info_overlay(detected, num_corners, num_markers, is_good)
@@ -331,7 +416,7 @@ class CharucoIntrinsicCaptureApp:
                         if self.countdown_start_time is None:
                             self.countdown_start_time = current_time
 
-                        countdown_duration = 3
+                        countdown_duration = 1
                         time_in_countdown = current_time - self.countdown_start_time
                         time_remaining = countdown_duration - time_in_countdown
 
