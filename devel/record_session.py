@@ -260,14 +260,12 @@ class CameraThread:
                 self.video_writer.write(color_image)
 
             if depth_image is not None and self._depth_dataset is not None:
-                if self.depth_scale is not None:
-                    depth_metric = depth_image.astype(np.float32) * self.depth_scale
-                else:
-                    depth_metric = depth_image.astype(np.float32)
-                # Append one frame: resize axis-0 by 1, then write
+                # Store raw uint16 z16 values — multiply by depth_scale for
+                # meters at read time.  Much smaller than float32.
+                depth_z16 = depth_image.astype(np.uint16)
                 n = self._depth_dataset.shape[0]
                 self._depth_dataset.resize(n + 1, axis=0)
-                self._depth_dataset[n] = depth_metric
+                self._depth_dataset[n] = depth_z16
 
     def prepare_recording(self, session_dir):
         """Set up writers and directories, but don't start recording yet.
@@ -296,12 +294,14 @@ class CameraThread:
                 'depth',
                 shape=(0, self.height, self.width),
                 maxshape=(None, self.height, self.width),
-                dtype=np.float32,
-                chunks=(1, self.height, self.width),  # one chunk = one frame
-                compression='lzf',   # fast lossless compression (lzf >> gzip for speed)
+                dtype=np.uint16,
+                chunks=(1, self.height, self.width),
+                compression='gzip',
+                compression_opts=4,
+                shuffle=True,       # byte-shuffle before gzip → much better ratio on uint16
             )
-            self._depth_h5.attrs['unit'] = 'meters'
-            self._depth_h5.attrs['dtype'] = 'float32'
+            self._depth_h5.attrs['unit'] = 'z16_raw'
+            self._depth_h5.attrs['dtype'] = 'uint16'
             self._depth_h5.attrs['source_stream_format'] = 'z16'
             self._depth_h5.attrs['depth_scale_meters_per_unit'] = self.depth_scale or 0.0
             self._depth_h5.attrs['cam_idx'] = self.cam_idx + 1
@@ -502,11 +502,12 @@ def main(args):
                     'file': f"cam{i + 1}/depth.h5",
                     'dataset': 'depth',
                     'shape': '(N, height, width)',
-                    'dtype': 'float32',
-                    'unit': 'meters',
-                    'compression': 'lzf',
+                    'dtype': 'uint16',
+                    'unit': 'z16_raw',
+                    'compression': 'gzip_level4_shuffle',
                     'source_stream_format': 'z16',
                     'depth_scale_meters_per_unit': cam.depth_scale,
+                    'note': 'depth_meters = data.astype(float32) * depth_scale',
                 },
             }
 
