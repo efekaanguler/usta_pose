@@ -34,7 +34,7 @@ Requirements (new):
 
 import argparse
 import cv2
-import h5py
+import csv
 import imageio.v3 as iio
 import imageio
 import numpy as np
@@ -89,7 +89,11 @@ class CameraThread:
         self.cam_dir = None       # per-camera subdirectory inside session_dir
         self.session_dir = None
         self.frame_count = 0
-        self.timestamps = []  # host-clock timestamps (ms) per recorded frame
+
+        # Timestamp storage: separate lists for color and depth
+        # Each entry: (frame_idx, hw_timestamp_ms, host_timestamp_ms, timestamp_domain)
+        self.color_timestamps = []
+        self.depth_timestamps = []
 
         # FFV1 depth video writer (imageio)
         self._depth_writer = None
@@ -189,6 +193,23 @@ class CameraThread:
         self.thread = threading.Thread(target=self._capture_loop, daemon=True)
         self.thread.start()
 
+    @staticmethod
+    def _get_hw_timestamp(frame):
+        """Extract hardware timestamp and domain from a RealSense frame.
+
+        Returns:
+            (hw_ts_ms, domain_str): hardware timestamp in ms and the clock domain name.
+        """
+        hw_ts = frame.get_timestamp()  # ms, from the frame's timestamp domain
+        domain = frame.timestamp_domain
+        domain_map = {
+            rs.timestamp_domain.hardware_clock: 'hardware_clock',
+            rs.timestamp_domain.system_time: 'system_time',
+            rs.timestamp_domain.global_time: 'global_time',
+        }
+        domain_str = domain_map.get(domain, str(domain))
+        return hw_ts, domain_str
+
     def _capture_loop(self):
         """Continuous frame capture in background thread.
 
@@ -197,12 +218,19 @@ class CameraThread:
         recycled before VideoWriter / imwrite finish reading it, causing a
         segfault.  All slow disk I/O is offloaded to _writer_loop via
         _write_queue so that this loop keeps up with wait_for_frames().
+
+        Timestamps are captured from the RealSense hardware clock immediately
+        after wait_for_frames() returns — before any processing — for maximum
+        accuracy.  A host-side perf_counter reference is also recorded.
         """
         while self.running:
             try:
                 frames = self.pipeline.wait_for_frames(timeout_ms=1000)
             except RuntimeError:
                 continue
+
+            # ── Capture host timestamp immediately after frame arrival ──
+            host_ts = time.perf_counter() * 1000.0  # ms with µs precision
 
             if self.enable_depth:
                 if self.align is not None:
@@ -218,6 +246,14 @@ class CameraThread:
 
             if not color_frame:
                 continue
+
+            # ── Extract hardware timestamps from RealSense frames ──
+            color_hw_ts, color_ts_domain = self._get_hw_timestamp(color_frame)
+
+            depth_hw_ts = None
+            depth_ts_domain = None
+            if depth_frame:
+                depth_hw_ts, depth_ts_domain = self._get_hw_timestamp(depth_frame)
 
             # COPY frame data — np.asanyarray returns a view into RS's buffer
             # which can be freed before write() finishes, causing a segfault.
@@ -238,16 +274,15 @@ class CameraThread:
 
             # Record if active — hand off to writer thread (no I/O here)
             if self.recording:
-                # Use time.perf_counter() for sub-millisecond precision.
-                # backend_timestamp gives only integer ms (33.0, 34.0 etc.)
-                # which hides the real jitter between frames.
-                ts = time.perf_counter() * 1000.0  # ms with µs precision
-
                 # Enqueue for the writer thread; drop frame if queue full
                 if self._write_queue is not None:
                     try:
-                        self._write_queue.put_nowait(
-                            (color_image, depth_image, self.frame_count, ts))
+                        self._write_queue.put_nowait((
+                            color_image, depth_image, self.frame_count,
+                            host_ts,
+                            color_hw_ts, color_ts_domain,
+                            depth_hw_ts, depth_ts_domain,
+                        ))
                         self.frame_count += 1
                     except queue.Full:
                         pass  # writer can't keep up — drop this frame
@@ -269,13 +304,25 @@ class CameraThread:
         never block the capture loop.  Depth frames are written one at a time
         via imageio FFV1 writer; RAM usage stays constant regardless of session
         length.
+
+        Timestamps from the RealSense hardware clock are accumulated here and
+        written to CSV files when recording stops.
         """
         while True:
             item = self._write_queue.get()
             if item is None:  # sentinel from stop_recording
                 break
-            color_image, depth_image, frame_idx, ts = item
-            self.timestamps.append(ts)
+            (color_image, depth_image, frame_idx,
+             host_ts,
+             color_hw_ts, color_ts_domain,
+             depth_hw_ts, depth_ts_domain) = item
+
+            # Accumulate timestamp records
+            self.color_timestamps.append(
+                (frame_idx, color_hw_ts, host_ts, color_ts_domain))
+            if depth_hw_ts is not None:
+                self.depth_timestamps.append(
+                    (frame_idx, depth_hw_ts, host_ts, depth_ts_domain))
 
             if self.video_writer is not None:
                 self.video_writer.write(color_image)
@@ -348,7 +395,8 @@ class CameraThread:
                 json.dump(depth_meta, f, indent=2)
 
         self.frame_count = 0
-        self.timestamps = []
+        self.color_timestamps = []
+        self.depth_timestamps = []
         self._barrier_passed = False
 
         # Start writer thread (I/O decoupled from capture)
@@ -378,22 +426,41 @@ class CameraThread:
             self._depth_writer.close()
             self._depth_writer = None
 
-        # Save per-frame timestamps as HDF5
-        timestamps_copy = list(self.timestamps)
-        if timestamps_copy and self.cam_dir is not None:
-            ts_path = os.path.join(self.cam_dir, "timestamps.h5")
-            ts_array = np.array(timestamps_copy, dtype=np.float64)
-            with h5py.File(ts_path, 'w') as hf:
-                ds = hf.create_dataset('timestamps', data=ts_array)
-                ds.attrs['cam_idx'] = self.cam_idx + 1
-                ds.attrs['source'] = 'perf_counter'
-                ds.attrs['unit'] = 'milliseconds'
-                ds.attrs['dtype'] = 'float64'
-                ds.attrs['frame_count'] = len(ts_array)
+        # Save per-frame timestamps as CSV (separate files for color and depth)
+        cam_name = f"cam{self.cam_idx + 1}"
+        color_ts_copy = list(self.color_timestamps)
+        depth_ts_copy = list(self.depth_timestamps)
+
+        if color_ts_copy and self.cam_dir is not None:
+            color_ts_path = os.path.join(
+                self.cam_dir, f"{cam_name}_color_timestamps.csv")
+            with open(color_ts_path, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    'frame_idx', 'hw_timestamp_ms',
+                    'host_timestamp_ms', 'timestamp_domain'
+                ])
+                for row in color_ts_copy:
+                    writer.writerow(row)
+
+        if depth_ts_copy and self.cam_dir is not None:
+            depth_ts_path = os.path.join(
+                self.cam_dir, f"{cam_name}_depth_timestamps.csv")
+            with open(depth_ts_path, 'w', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    'frame_idx', 'hw_timestamp_ms',
+                    'host_timestamp_ms', 'timestamp_domain'
+                ])
+                for row in depth_ts_copy:
+                    writer.writerow(row)
 
         frame_count = self.frame_count
-        self.timestamps = []
-        return frame_count, timestamps_copy
+        # Extract hw timestamps for the timing report (color stream as reference)
+        hw_timestamps_ms = [row[1] for row in color_ts_copy]
+        self.color_timestamps = []
+        self.depth_timestamps = []
+        return frame_count, hw_timestamps_ms
 
     def stop(self):
         """Stop capture thread and release pipeline."""
@@ -671,10 +738,15 @@ def main(args):
                 'intrinsics': cam.intrinsics_data,
                 'calibration': cam.calibration_data,
                 'frame_count': frame_counts[i + 1],
-                'timestamp_source': 'perf_counter',
-                'timestamp_file_format': 'hdf5',
-                'timestamp_file': f"cam{i + 1}/timestamps.h5",
-                'timestamp_dataset': 'timestamps',
+                'timestamp_source': 'realsense_hardware_clock',
+                'timestamp_host_reference': 'perf_counter',
+                'timestamp_file_format': 'csv',
+                'color_timestamp_file': f"cam{i + 1}/cam{i + 1}_color_timestamps.csv",
+                'depth_timestamp_file': f"cam{i + 1}/cam{i + 1}_depth_timestamps.csv",
+                'timestamp_columns': [
+                    'frame_idx', 'hw_timestamp_ms',
+                    'host_timestamp_ms', 'timestamp_domain',
+                ],
                 'depth_storage': {
                     'format': 'ffv1_mkv',
                     'file': f"cam{i + 1}/depth.mkv",
