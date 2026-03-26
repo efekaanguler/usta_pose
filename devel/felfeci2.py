@@ -201,7 +201,7 @@ class CameraThread:
             (hw_ts_ms, domain_str): hardware timestamp in ms and the clock domain name.
         """
         hw_ts = frame.get_timestamp()  # ms, from the frame's timestamp domain
-        domain = frame.timestamp_domain
+        domain = frame.frame_timestamp_domain
         domain_map = {
             rs.timestamp_domain.hardware_clock: 'hardware_clock',
             rs.timestamp_domain.system_time: 'system_time',
