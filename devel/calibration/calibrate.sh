@@ -48,7 +48,7 @@ OUTPUT_FILE="${SCRIPT_DIR}/multicam_calibration.npz"
 CAM_CONFIG="${SCRIPT_DIR}/../camera_config.json"
 
 # Çekim başına hedef görüntü sayısı
-NUM_CAPTURES=30
+NUM_CAPTURES=20
 CAPTURE_INTERVAL=4.0     # saniye (auto-capture arası)
 
 # Referans kamera (extrinsic grafinin merkezlendiği kamera)
