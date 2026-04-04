@@ -899,9 +899,9 @@ if __name__ == '__main__':
                         help='Path to camera config JSON file mapping cam IDs to serial numbers')
     parser.add_argument('--output-dir', type=str, default='./recordings',
                         help='Base directory for recordings')
-    parser.add_argument('--width', type=int, default=640, help='Frame width')
-    parser.add_argument('--height', type=int, default=480, help='Frame height')
-    parser.add_argument('--fps', type=int, default=15, help='Frames per second')
+    parser.add_argument('--width', type=int, default=1280, help='Frame width')
+    parser.add_argument('--height', type=int, default=720, help='Frame height')
+    parser.add_argument('--fps', type=int, default=30, help='Frames per second')
     parser.add_argument(
         '--align-depth-live',
         action='store_true',
