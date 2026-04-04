@@ -34,6 +34,7 @@ import cv2
 import numpy as np
 from pathlib import Path
 from datetime import datetime
+import json
 
 
 class MulticamCalibrator:
@@ -498,6 +499,59 @@ class MulticamCalibrator:
         np.savez(self.args.output, **data)
         print(f"\nSaved calibration to {self.args.output}")
 
+    def save_calibration_summary(self, transforms, ref_cam):
+        """Save calibration metric summary to a JSON file."""
+        summary = {
+            "num_cameras": self.num_cameras,
+            "reference_camera": ref_cam + 1,
+            "cameras_calibrated": sum(1 for v in transforms.values() if v is not None),
+            "intrinsics": {},
+            "pairwise_edges": [],
+            "transforms_from_ref": {}
+        }
+        
+        for cam_idx in range(self.num_cameras):
+            _, _, error = self.intrinsics[cam_idx]
+            status = "OK" if transforms.get(cam_idx) is not None else "UNREACHABLE"
+            summary["intrinsics"][f"camera_{cam_idx + 1}"] = {
+                "mean_reprojection_error_px": float(error),
+                "status": status
+            }
+            
+        for (i, j), (_, T, rms, n) in sorted(self.edges.items()):
+            summary["pairwise_edges"].append({
+                "camera_pair": [i + 1, j + 1],
+                "rms_error_px": float(rms),
+                "baseline_meters": float(np.linalg.norm(T)),
+                "num_shared_captures": int(n)
+            })
+            
+        for cam_idx in range(self.num_cameras):
+            if cam_idx == ref_cam:
+                continue
+            if transforms.get(cam_idx) is None:
+                continue
+                
+            R_to_ref, t_to_ref = transforms[cam_idx]
+            R_ref_to_cam = R_to_ref.T
+            t_ref_to_cam = -R_to_ref.T @ t_to_ref
+            
+            baseline = float(np.linalg.norm(t_ref_to_cam))
+            rvec, _ = cv2.Rodrigues(R_ref_to_cam)
+            angle = float(np.linalg.norm(rvec) * 180 / np.pi)
+            
+            summary["transforms_from_ref"][f"camera_{cam_idx + 1}"] = {
+                "baseline_meters": baseline,
+                "rotation_angle_degrees": angle
+            }
+            
+        output_file = Path(self.args.output)
+        summary_path = output_file.with_name(output_file.stem + "_summary.json")
+        
+        with open(summary_path, 'w', encoding='utf-8') as f:
+            json.dump(summary, f, indent=4)
+        print(f"\nSaved calibration summary metrics to {summary_path}")
+
     # --- Main ---
 
     def run(self):
@@ -600,6 +654,8 @@ class MulticamCalibrator:
             print(f"    Translation vector T (meters): {t_ref_to_cam}")
             print(f"    Baseline (distance between cameras): {baseline:.4f} meters")
             print(f"    Rotation: {angle:.2f} degrees around axis [{axis[0]:.4f}, {axis[1]:.4f}, {axis[2]:.4f}]")
+
+        self.save_calibration_summary(transforms, ref_cam)
 
         print(f"\n{'=' * 70}\n")
 

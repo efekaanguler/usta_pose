@@ -6,10 +6,12 @@
 #  AŞAMALAR
 #  --------
 #  1. Intrinsic capture   : Her kamera için ayrı ayrı görüntü çekimi (4×)
-#  2. Extrinsic capture   : 3 stereo oturumu ile kameralar arası görüntü çekimi
+#  2. Extrinsic capture   : 5 stereo oturumu ile kameralar arası görüntü çekimi
 #       Oturum A : cam1 + cam3  (tripod sol  ↔ masa sol)
 #       Oturum B : cam2 + cam4  (tripod sağ  ↔ masa sağ)
 #       Oturum C : cam1 + cam2  (iki tripod kamerası)
+#       Oturum D : cam2 + cam3
+#       Oturum E : cam1 + cam4
 #  3. Çok-kamera kalibrasyon : multicam_calibrate.py ile
 #       → intrinsic (K, dist) + extrinsic (R,T) tüm kameralar için
 #       → çıktı: $OUTPUT_FILE
@@ -103,6 +105,10 @@ python_cmd() {
 # ---------------------------------------------------------------------------
 mkdir -p "${CALIB_DIR}"
 
+LOG_FILE="${CALIB_DIR}/calibration_$(date +%Y%m%d_%H%M%S).log"
+exec > >(tee -a "${LOG_FILE}") 2>&1
+log "Tüm çıktılar ${LOG_FILE} konumuna kaydediliyor..."
+
 # Intrinsic ve extrinsic çekim dizinleri
 INTR_DIR="${CALIB_DIR}/intrinsic"
 EXTR_DIR="${CALIB_DIR}/extrinsic"
@@ -115,6 +121,8 @@ INTR_CAM4="${INTR_DIR}/cam4"
 SESSION_A="${EXTR_DIR}/session_cam1_cam3"   # tripod sol  ↔ masa sol
 SESSION_B="${EXTR_DIR}/session_cam2_cam4"   # tripod sağ  ↔ masa sağ
 SESSION_C="${EXTR_DIR}/session_cam1_cam2"   # iki tripod
+SESSION_D="${EXTR_DIR}/session_cam2_cam3"   # kamera 2 + 3
+SESSION_E="${EXTR_DIR}/session_cam1_cam4"   # kamera 1 + 4
 
 # =============================================================================
 #  AŞAMA 1 — INTRINSIC ÇEKIM (4 kamera ayrı ayrı)
@@ -147,10 +155,10 @@ else
 fi
 
 # =============================================================================
-#  AŞAMA 2 — EXTRINSIC STEREO ÇEKIM (3 oturum)
+#  AŞAMA 2 — EXTRINSIC STEREO ÇEKIM (5 oturum)
 # =============================================================================
 if [ "${SKIP_CAPTURE}" = false ]; then
-    log "AŞAMA 2 — Extrinsic stereo çekim (3 oturum)"
+    log "AŞAMA 2 — Extrinsic stereo çekim (5 oturum)"
     echo "  Board'u iki kameranın ortak görüş alanında tutun."
     echo ""
 
@@ -158,9 +166,11 @@ if [ "${SKIP_CAPTURE}" = false ]; then
         ["${SESSION_A}"]="1,3"
         ["${SESSION_B}"]="2,4"
         ["${SESSION_C}"]="1,2"
+        ["${SESSION_D}"]="2,3"
+        ["${SESSION_E}"]="1,4"
     )
 
-    for SESSION_DIR in "${SESSION_A}" "${SESSION_B}" "${SESSION_C}"; do
+    for SESSION_DIR in "${SESSION_A}" "${SESSION_B}" "${SESSION_C}" "${SESSION_D}" "${SESSION_E}"; do
         CAM_IDS="${SESSION_CAMERAS[${SESSION_DIR}]}"
         mkdir -p "${SESSION_DIR}"
 
@@ -193,7 +203,7 @@ python_cmd "${SCRIPT_DIR}/multicam_calibrate.py" \
     --intrinsic-dir-2 "${INTR_CAM2}" \
     --intrinsic-dir-3 "${INTR_CAM3}" \
     --intrinsic-dir-4 "${INTR_CAM4}" \
-    --session-dirs "${SESSION_A}" "${SESSION_B}" "${SESSION_C}" \
+    --session-dirs "${SESSION_A}" "${SESSION_B}" "${SESSION_C}" "${SESSION_D}" "${SESSION_E}" \
     --output        "${OUTPUT_FILE}" \
     --num-cameras   4 \
     --ref-camera    "${REF_CAMERA}" \
