@@ -77,7 +77,7 @@ def deproject_pixel_to_3d(x, y, depth_image, K, depth_scale):
     Y = (y - cy) * Z / fy
     return [X, Y, Z, Z]
 
-def process_camera(cam_num, session_dir, calib_npz_path, model_path):
+def process_camera(cam_num, session_dir, calib_npz_path, model_path, save_video=False):
     print(f"\nProcessing Camera {cam_num}...")
     cam_dir = os.path.join(session_dir, f"cam{cam_num}")
     color_vid = os.path.join(cam_dir, "color.mp4")
@@ -111,6 +111,10 @@ def process_camera(cam_num, session_dir, calib_npz_path, model_path):
     PoseLandmarkerOptions = mp.tasks.vision.PoseLandmarkerOptions
     VisionRunningMode = mp.tasks.vision.RunningMode
     
+    from mediapipe.tasks.python.vision import drawing_utils as mp_drawing
+    from mediapipe.tasks.python.vision import drawing_styles as mp_drawing_styles
+    from mediapipe.tasks.python.vision import pose_landmarker as mp_pose_landmarker
+    
     options = PoseLandmarkerOptions(
         base_options=BaseOptions(model_asset_path=model_path),
         running_mode=VisionRunningMode.IMAGE,
@@ -132,6 +136,15 @@ def process_camera(cam_num, session_dir, calib_npz_path, model_path):
         print(f"Error opening depth_vid {depth_vid}: {e}")
         return
         
+    out_video = None
+    if save_video:
+        vid_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        vid_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        vid_fps = cap.get(cv2.CAP_PROP_FPS)
+        out_vid_path = os.path.join(cam_dir, f"cam{cam_num}_pose.mp4")
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        out_video = cv2.VideoWriter(out_vid_path, fourcc, vid_fps, (vid_w, vid_h))
+        
     with PoseLandmarker.create_from_options(options) as landmarker:
         for i in tqdm(range(len(df)), desc=f"Cam {cam_num} Frames"):
             ret, frame = cap.read()
@@ -143,6 +156,8 @@ def process_camera(cam_num, session_dir, calib_npz_path, model_path):
                 
             if not ret or depth_frame is None:
                 pose_arrays.append(json.dumps([[None, None, None]] * 33))
+                if save_video and out_video is not None and ret:
+                    out_video.write(frame)
                 continue
                 
             # Convert frame to RGB for MediaPipe
@@ -183,11 +198,26 @@ def process_camera(cam_num, session_dir, calib_npz_path, model_path):
                     valid_pts = np.sum(~np.isnan(local_3d_points[:, 0]))
                     if valid_pts == 0:
                         print(f"Frame {i}: MediaPipe found pose, but local_3d_points are ALL NaNs (Z out of bounds).")
+                        
+                if save_video and out_video is not None:
+                    # Natively feed the normalized landmark components directly provided by modern tasks API
+                    mp_drawing.draw_landmarks(
+                        frame,
+                        landmarks,
+                        mp_pose_landmarker.PoseLandmarksConnections.POSE_LANDMARKS,
+                        mp_drawing.DrawingSpec(color=(245, 117, 66), thickness=2, circle_radius=2),
+                        mp_drawing.DrawingSpec(color=(245, 66, 230), thickness=2, circle_radius=2)
+                    )
+                
+            if save_video and out_video is not None:
+                out_video.write(frame)
                 
             # Convert the array to a JSON string formatted payload
             pose_arrays.append(json.dumps(frame_pose_3d))
             
     cap.release()
+    if out_video is not None:
+        out_video.release()
     depth_container.close()
     
     # Save to CSV
@@ -201,6 +231,7 @@ def main():
     parser.add_argument('--session-dir', type=str, required=True, help='Path to the session_YYMMDD_HHMMSS folder')
     parser.add_argument('--calib-npz', type=str, default=None, help='Path to multi_camera_calibration.npz (defaults to session-dir/multicam_calibration.npz)')
     parser.add_argument('--model', type=str, default='/workspace/mediapipe/pose_landmarker_full.task', help='Path to MediaPipe model.task')
+    parser.add_argument('--save-video', action='store_true', help='Generate .mp4 visualization videos in each cam directory')
     args = parser.parse_args()
     
     # If calib-npz is not provided, default to the one inside session-dir
@@ -209,7 +240,7 @@ def main():
     
     # Process pose exclusively for cameras 1 and 2
     for cam_num in [1, 2]:
-        process_camera(cam_num, args.session_dir, args.calib_npz, args.model)
+        process_camera(cam_num, args.session_dir, args.calib_npz, args.model, args.save_video)
         
     print("Process complete! Check the pose_timestamps.csv in each camera's directory.")
 
