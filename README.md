@@ -1,6 +1,6 @@
 # Usta Pose
 
-Efe + Kekec + Araz'ın usta projesindeki pose görevini ortaklaşa götürmek için oluşturulmuş repo.
+Efe + Kekec + Ege + Araz'ın usta projesindeki pose görevini ortaklaşa götürmek için oluşturulmuş repo.
 
 ## Kurulum
 
