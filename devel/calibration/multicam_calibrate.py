@@ -35,6 +35,7 @@ import numpy as np
 from pathlib import Path
 from datetime import datetime
 import json
+import yaml
 
 
 class MulticamCalibrator:
@@ -99,6 +100,7 @@ class MulticamCalibrator:
             self.image_size = (image.shape[1], image.shape[0])
 
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        
         charuco_corners, charuco_ids, _, _ = self.charuco_detector.detectBoard(gray)
 
         if charuco_corners is not None and len(charuco_corners) >= 4:
@@ -499,6 +501,55 @@ class MulticamCalibrator:
         np.savez(self.args.output, **data)
         print(f"\nSaved calibration to {self.args.output}")
 
+    def save_calibration_yaml(self, transforms, ref_cam):
+        """Save calibration to a readable YAML format containing full parameter matrices."""
+        yaml_data = {
+            'calibration_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'image_width': int(self.image_size[0]) if self.image_size else 0,
+            'image_height': int(self.image_size[1]) if self.image_size else 0,
+            'board_config': {
+                'squares_x': int(self.args.squares_x),
+                'squares_y': int(self.args.squares_y),
+                'square_length': float(self.args.square_length),
+                'marker_length': float(self.args.marker_length),
+                'aruco_dict': self.args.aruco_dict
+            },
+            'num_cameras': self.num_cameras,
+            'reference_camera': ref_cam + 1,
+            'cameras': {}
+        }
+
+        for cam_idx in range(self.num_cameras):
+            cam_num = cam_idx + 1
+            K, dist, error = self.intrinsics[cam_idx]
+            
+            cam_data = {
+                'camera_matrix': K.tolist(),
+                'distortion_coefficients': dist.flatten().tolist(),
+                'reprojection_error': float(error)
+            }
+
+            if cam_idx != ref_cam and transforms.get(cam_idx) is not None:
+                R_to_ref, t_to_ref = transforms[cam_idx]
+                R_ref_to_cam = R_to_ref.T
+                t_ref_to_cam = -R_to_ref.T @ t_to_ref
+                
+                cam_data['transform_from_ref'] = {
+                    'rotation_matrix': R_ref_to_cam.tolist(),
+                    'translation_vector': t_ref_to_cam.flatten().tolist(),
+                    'baseline_meters': float(np.linalg.norm(t_ref_to_cam))
+                }
+            
+            yaml_data['cameras'][f'camera_{cam_num}'] = cam_data
+
+        output_file = Path(self.args.output)
+        yaml_path = output_file.with_name(output_file.stem + ".yaml")
+
+        with open(yaml_path, 'w', encoding='utf-8') as f:
+            yaml.dump(yaml_data, f, default_flow_style=False, sort_keys=False)
+            
+        print(f"Saved readable calibration parameters to {yaml_path}")
+
     def save_calibration_summary(self, transforms, ref_cam):
         """Save calibration metric summary to a JSON file."""
         summary = {
@@ -613,6 +664,7 @@ class MulticamCalibrator:
 
         # Save
         self.save_calibration(transforms, ref_cam)
+        self.save_calibration_yaml(transforms, ref_cam)
 
         # Quality summary
         print(f"\n{'=' * 70}")

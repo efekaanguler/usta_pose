@@ -42,7 +42,7 @@ ARUCO_DICT="4X4_50"
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CALIB_DIR="${SCRIPT_DIR}/calib_data"      # tüm ara veriler buraya
-OUTPUT_FILE="${SCRIPT_DIR}/multicam_calibration.npz"
+OUTPUT_FILE="${CALIB_DIR}/multicam_calibration.npz"
 
 # Kamera config dosyası (record_session ile aynı)
 CAM_CONFIG="${SCRIPT_DIR}/../camera_config.json"
