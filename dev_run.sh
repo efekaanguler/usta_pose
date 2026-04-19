@@ -16,12 +16,18 @@ else
     GPU_FLAG=""
 fi
 
+# X11 Erişimi (GUI için)
+xhost +local:root &> /dev/null
+
 # Container'ı çalıştır
 # Parent dizin host_mount olarak mount ediliyor
 # Working directory container içinde host_mount/$REPO_NAME olacak
 docker run -it --rm \
     $GPU_FLAG \
     --privileged \
+    --net=host \
+    -e DISPLAY=$DISPLAY \
+    -v /tmp/.X11-unix:/tmp/.X11-unix \
     -v /dev:/dev \
     -v /dev/bus/usb:/dev/bus/usb \
     --group-add video \

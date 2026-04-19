@@ -61,11 +61,8 @@ def load_calibration(calib_path, cam_num):
     R_key = f'R_{cam_num}_to_ref'
     t_key = f't_{cam_num}_to_ref'
     if R_key in calib and t_key in calib:
-        R_ref_to_cam = calib[R_key]
-        t_ref_to_cam = calib[t_key]
-        # Invert: cam → ref
-        R_cam_to_ref = R_ref_to_cam.T
-        t_cam_to_ref = -R_ref_to_cam.T @ t_ref_to_cam.flatten()
+        R_cam_to_ref = calib[R_key]
+        t_cam_to_ref = calib[t_key].flatten()
         return R_cam_to_ref, t_cam_to_ref
     print(f"Warning: Calibration for cam {cam_num} not found. Using identity.")
     return np.eye(3), np.zeros(3)
@@ -329,8 +326,10 @@ def main():
 
     # Default model paths: relative to this script
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    devel_dir = os.path.dirname(script_dir)  # usta_pose/devel
-    rtmw2d_dir = os.path.join(devel_dir, "test_on_udiva", "rtmw2d")
+    process_dir = script_dir  # usta_pose/devel/process
+    devel_dir = os.path.dirname(process_dir)  # usta_pose/devel
+    project_root = os.path.dirname(devel_dir)  # usta_pose
+    rtmw2d_dir = os.path.join(project_root, "models", "pose", "rtmw2d")
 
     cfg_path = args.cfg_path or os.path.join(
         rtmw2d_dir, "rtmpose-l_8xb32-270e_coco-wholebody-384x288.py")

@@ -36,55 +36,73 @@ echo "======================================================================="
 echo ""
 
 # ── Step 1: Frame Matching ──────────────────────────────────────────────
-echo "╔══════════════════════════════════════════════════════╗"
-echo "║  STEP 1/4 — Frame Matching                         ║"
-echo "╚══════════════════════════════════════════════════════╝"
-START=$(date +%s)
+if [ -z "${SKIP_STEP1:-}" ]; then
+    echo "╔══════════════════════════════════════════════════════╗"
+    echo "║  STEP 1/4 — Frame Matching                           ║"
+    echo "╚══════════════════════════════════════════════════════╝"
+    START=$(date +%s)
 
-python3 "$SCRIPT_DIR/match_frames.py" \
-    --session-dir "$SESSION_DIR"
+    python3 "$SCRIPT_DIR/match_frames.py" \
+        --session-dir "$SESSION_DIR"
 
-END=$(date +%s)
-echo "  ⏱ Step 1 completed in $((END - START))s"
+    END=$(date +%s)
+    echo "  ⏱ Step 1 completed in $((END - START))s"
+    echo ""
+else
+    echo "⏭ Skipping Step 1 (Frame Matching)..."
+    echo ""
+fi
 echo ""
 
 # ── Step 2: Pose Processing ─────────────────────────────────────────────
-echo "╔══════════════════════════════════════════════════════╗"
-echo "║  STEP 2/4 — Pose Processing (cam1, cam2)           ║"
-echo "╚══════════════════════════════════════════════════════╝"
-START=$(date +%s)
+if [ -z "${SKIP_STEP2:-}" ]; then
+    echo "╔══════════════════════════════════════════════════════╗"
+    echo "║  STEP 2/4 — Pose Processing (cam1, cam2)             ║"
+    echo "╚══════════════════════════════════════════════════════╝"
+    START=$(date +%s)
 
-POSE_ARGS=(
-    --session-dir "$SESSION_DIR"
-    --matched-csv "$SESSION_DIR/matched_frames.csv"
-)
-if [ -n "$CALIB_NPZ" ]; then
-    POSE_ARGS+=(--calib-npz "$CALIB_NPZ")
+    POSE_ARGS=(
+        --session-dir "$SESSION_DIR"
+        --matched-csv "$SESSION_DIR/matched_frames.csv"
+    )
+    if [ -n "$CALIB_NPZ" ]; then
+        POSE_ARGS+=(--calib-npz "$CALIB_NPZ")
+    fi
+
+    python3 "$SCRIPT_DIR/run_pose.py" "${POSE_ARGS[@]}"
+
+    END=$(date +%s)
+    echo "  ⏱ Step 2 completed in $((END - START))s"
+    echo ""
+else
+    echo "⏭ Skipping Step 2 (Pose Processing)..."
+    echo ""
 fi
-
-python3 "$SCRIPT_DIR/run_pose.py" "${POSE_ARGS[@]}"
-
-END=$(date +%s)
-echo "  ⏱ Step 2 completed in $((END - START))s"
 echo ""
 
 # ── Step 3: Gaze Processing ─────────────────────────────────────────────
-echo "╔══════════════════════════════════════════════════════╗"
-echo "║  STEP 3/4 — Gaze Processing (cam3, cam4)           ║"
-echo "╚══════════════════════════════════════════════════════╝"
-START=$(date +%s)
+if [ -z "${SKIP_STEP3:-}" ]; then
+    echo "╔══════════════════════════════════════════════════════╗"
+    echo "║  STEP 3/4 — Gaze Processing (cam3, cam4)             ║"
+    echo "╚══════════════════════════════════════════════════════╝"
+    START=$(date +%s)
 
-python3 "$SCRIPT_DIR/run_gaze.py" \
-    --session-dir "$SESSION_DIR" \
-    --matched-csv "$SESSION_DIR/matched_frames.csv"
+    python3 "$SCRIPT_DIR/run_gaze.py" \
+        --session-dir "$SESSION_DIR" \
+        --matched-csv "$SESSION_DIR/matched_frames.csv"
 
-END=$(date +%s)
-echo "  ⏱ Step 3 completed in $((END - START))s"
+    END=$(date +%s)
+    echo "  ⏱ Step 3 completed in $((END - START))s"
+    echo ""
+else
+    echo "⏭ Skipping Step 3 (Gaze Processing)..."
+    echo ""
+fi
 echo ""
 
 # ── Step 4: CSV Assembly ────────────────────────────────────────────────
 echo "╔══════════════════════════════════════════════════════╗"
-echo "║  STEP 4/4 — CSV Assembly                           ║"
+echo "║  STEP 4/4 — CSV Assembly                             ║"
 echo "╚══════════════════════════════════════════════════════╝"
 START=$(date +%s)
 

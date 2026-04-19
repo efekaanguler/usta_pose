@@ -267,11 +267,13 @@ def main():
 
     # Default PureGaze paths
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(os.path.dirname(os.path.dirname(script_dir)))
-    gaze_est_dir = os.path.join(project_root, "USTA-Human-Interaction-Analysis", "gaze_estimation")
+    process_dir = script_dir  # usta_pose/devel/process
+    devel_dir = os.path.dirname(process_dir)  # usta_pose/devel
+    project_root = os.path.dirname(devel_dir)  # usta_pose
+    gaze_est_dir = os.path.join(project_root, "..", "USTA-Human-Interaction-Analysis", "gaze_estimation")
 
     weights_path = args.puregaze_weights or os.path.join(
-        gaze_est_dir, "models", "Res50_PureGaze_ETH.pt")
+        project_root, "models", "gaze", "res50_puregaze", "Res50_PureGaze_ETH.pt")
     model_dir = args.puregaze_model_dir or gaze_est_dir
 
     if not os.path.exists(weights_path):
