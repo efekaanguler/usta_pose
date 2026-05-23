@@ -1,0 +1,14 @@
+Zincir
+
+Bu görevde amaç, toplam 18 diski masanın ortasında tek bir zincir halinde dizmektir. Her diskin üzerinde bir renk ve bir sayı vardır.
+
+Zincir, ilk diskin masanın ortasına konmasıyla başlar. Bundan sonra yeni diskler sadece zincirin sağ ucuna veya sol ucuna eklenebilir. Zincirin ortasına disk koyulamaz. Masada ikinci bir zincir oluşturmak yasaktır; tüm diskler aynı ana zincire eklenmelidir.
+
+Yeni koyulan disk, eklendiği uçtaki diskle ya aynı renkte ya da aynı sayıda olmalıdır.
+
+Örnek: Zincirin ucunda Sarı-3  varsa, yanına Sarı-4 koyulabilir çünkü renk aynıdır. Kırmızı-3 de koyulabilir çünkü sayı aynıdır. Ama Mavi-6 koyulamaz çünkü ne rengi ne de sayısı aynıdır.
+
+Gerekirse zincirin uçlarından disk geri alınabilir. Geri alma sadece sağ veya sol uçtan yapılabilir; zincirin ortasından disk çıkarılamaz.
+
+Görev, 18 diskin tamamı kurallara uygun şekilde tek zincire eklendiğinde tamamlanır.
+
