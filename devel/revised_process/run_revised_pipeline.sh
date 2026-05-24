@@ -32,9 +32,20 @@ if [ -z "${SKIP_POSE:-}" ]; then
     
     for cam_id in 1 2; do
         if [ -d "$SESSION_DIR/cam$cam_id" ]; then
+            bbox_var="POSE_BBOX_CAM${cam_id}"
+            bbox_args=()
+            if [ -n "${!bbox_var:-}" ]; then
+                read -r -a bbox_values <<< "${!bbox_var}"
+                if [ "${#bbox_values[@]}" -ne 4 ]; then
+                    echo "Error: ${bbox_var} must contain four values: x1 y1 x2 y2"
+                    exit 1
+                fi
+                bbox_args=(--bbox "${bbox_values[@]}")
+            fi
             python3 "$SCRIPT_DIR/extract_pose_independent.py" \
                 --session-dir "$SESSION_DIR" \
-                --cam-id $cam_id
+                --cam-id $cam_id \
+                "${bbox_args[@]}"
         else
             echo "Warning: cam$cam_id directory not found, skipping."
         fi

@@ -9,7 +9,8 @@ keypoint directly as:
     keypoint_world = root_world + keypoint_relative
 
 It intentionally does not center, normalize, align, scale, or otherwise
-transform either person independently.
+transform either person independently. A fixed display-only rotation is applied
+only when converting reconstructed coordinates into RViz marker points.
 """
 
 import argparse
@@ -87,6 +88,11 @@ except ImportError:
 
 NUM_KEYPOINTS = 133
 WORLD_FRAME = "world"
+RVIZ_DISPLAY_ROTATION = np.array([
+    [1.0, 0.0, 0.0],
+    [0.0, 0.0, 1.0],
+    [0.0, -1.0, 0.0],
+], dtype=np.float64)
 
 # Body keypoint connections (kpt 0-16)
 BODY_SKELETON = [
@@ -202,6 +208,14 @@ def reconstruct_keypoints(row, person_id, num_keypoints=NUM_KEYPOINTS):
 
 def to_point(values):
     return Point(x=float(values[0]), y=float(values[1]), z=float(values[2]))
+
+
+def rotate_for_rviz(point):
+    return RVIZ_DISPLAY_ROTATION @ np.asarray(point, dtype=np.float64)
+
+
+def to_rviz_point(values):
+    return to_point(rotate_for_rviz(values))
 
 
 def gaze_is_available(row, person_id):
@@ -446,7 +460,7 @@ class VisualizerNode(Node):
         joint_marker.scale.y = 0.025
         joint_marker.scale.z = 0.025
         joint_marker.color = colors["joint"]
-        joint_marker.points = [to_point(point) for point in keypoints if point is not None]
+        joint_marker.points = [to_rviz_point(point) for point in keypoints if point is not None]
         if joint_marker.points:
             markers.append(joint_marker)
 
@@ -467,8 +481,8 @@ class VisualizerNode(Node):
             end = keypoints[end_idx]
             if start is None or end is None:
                 continue
-            bone_marker.points.append(to_point(start))
-            bone_marker.points.append(to_point(end))
+            bone_marker.points.append(to_rviz_point(start))
+            bone_marker.points.append(to_rviz_point(end))
 
         if bone_marker.points:
             markers.append(bone_marker)
@@ -482,7 +496,7 @@ class VisualizerNode(Node):
         root_marker.action = Marker.ADD
         root_marker.lifetime.nanosec = lifetime_ns
         root_marker.pose.orientation.w = 1.0
-        root_marker.pose.position = to_point(root)
+        root_marker.pose.position = to_rviz_point(root)
         root_marker.scale.x = 0.06
         root_marker.scale.y = 0.06
         root_marker.scale.z = 0.06
@@ -513,7 +527,7 @@ class VisualizerNode(Node):
         marker.scale.y = 0.03
         marker.scale.z = 0.05
         marker.color = PERSON_COLORS[person_id]["gaze"]
-        marker.points = [to_point(origin), to_point(end)]
+        marker.points = [to_rviz_point(origin), to_rviz_point(end)]
         return marker
 
     def create_gaze_delete_marker(self, person_id, stamp):

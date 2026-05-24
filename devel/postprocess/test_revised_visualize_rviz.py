@@ -55,21 +55,64 @@ class RevisedVisualizeRvizTests(unittest.TestCase):
             rv.reconstruct_keypoint(row, 2, 10),
         )
 
-    def test_generated_joint_marker_points_preserve_world_coordinates(self):
+    def assert_point_close(self, point, expected):
+        np.testing.assert_allclose([point.x, point.y, point.z], expected)
+
+    def test_rviz_display_rotation_is_proper_90_degree_x_rotation(self):
+        np.testing.assert_allclose(rv.rotate_for_rviz([1.0, 2.0, 3.0]), [1.0, 3.0, -2.0])
+        self.assertAlmostEqual(float(np.linalg.det(rv.RVIZ_DISPLAY_ROTATION)), 1.0)
+
+    def test_generated_joint_marker_points_are_rotated_for_rviz(self):
         node = rv.VisualizerNode.__new__(rv.VisualizerNode)
         node.fps = 30.0
-        p1_keypoints = [None] * rv.NUM_KEYPOINTS
-        p2_keypoints = [None] * rv.NUM_KEYPOINTS
-        p1_keypoints[0] = np.array([0.0, 0.0, 0.0])
-        p2_keypoints[0] = np.array([1.0, 0.0, 0.0])
+        keypoints = [None] * rv.NUM_KEYPOINTS
+        keypoints[0] = np.array([1.0, 2.0, 3.0])
 
-        p1_markers = node.create_person_markers(1, np.array([0.0, 0.0, 0.0]), p1_keypoints, None)
-        p2_markers = node.create_person_markers(2, np.array([1.0, 0.0, 0.0]), p2_keypoints, None)
-        p1_joint = next(marker for marker in p1_markers if marker.ns == "person1_joints")
-        p2_joint = next(marker for marker in p2_markers if marker.ns == "person2_joints")
+        markers = node.create_person_markers(1, np.array([0.0, 0.0, 0.0]), keypoints, None)
+        joint = next(marker for marker in markers if marker.ns == "person1_joints")
 
-        self.assertEqual((p1_joint.points[0].x, p1_joint.points[0].y, p1_joint.points[0].z), (0.0, 0.0, 0.0))
-        self.assertEqual((p2_joint.points[0].x, p2_joint.points[0].y, p2_joint.points[0].z), (1.0, 0.0, 0.0))
+        self.assert_point_close(joint.points[0], [1.0, 3.0, -2.0])
+
+    def test_bone_marker_data_z_separation_becomes_rviz_y_separation(self):
+        node = rv.VisualizerNode.__new__(rv.VisualizerNode)
+        node.fps = 30.0
+        keypoints = [None] * rv.NUM_KEYPOINTS
+        keypoints[0] = np.array([0.0, 0.0, 0.0])
+        keypoints[1] = np.array([0.0, 0.0, 2.0])
+
+        markers = node.create_person_markers(1, np.array([0.0, 0.0, 0.0]), keypoints, None)
+        bones = next(marker for marker in markers if marker.ns == "person1_bones")
+
+        self.assert_point_close(bones.points[0], [0.0, 0.0, 0.0])
+        self.assert_point_close(bones.points[1], [0.0, 2.0, 0.0])
+
+    def test_root_marker_position_is_rotated_for_rviz(self):
+        node = rv.VisualizerNode.__new__(rv.VisualizerNode)
+        node.fps = 30.0
+        keypoints = [None] * rv.NUM_KEYPOINTS
+
+        markers = node.create_person_markers(1, np.array([1.0, 2.0, 3.0]), keypoints, None)
+        root = next(marker for marker in markers if marker.ns == "person1_root")
+
+        self.assert_point_close(root.pose.position, [1.0, 3.0, -2.0])
+
+    def test_gaze_marker_origin_and_end_are_rotated_for_rviz(self):
+        node = rv.VisualizerNode.__new__(rv.VisualizerNode)
+        node.fps = 30.0
+        node.gaze_length = 2.0
+        row = self.row_with_root(1, [1.0, 2.0, 3.0])
+        row.update({
+            "p1_gaze_dir_x": 0.0,
+            "p1_gaze_dir_y": 0.0,
+            "p1_gaze_dir_z": 4.0,
+            "p1_gaze_observed": True,
+        })
+        keypoints = [None] * rv.NUM_KEYPOINTS
+
+        marker = node.create_gaze_marker(row, 1, keypoints, None)
+
+        self.assert_point_close(marker.points[0], [1.0, 3.0, -2.0])
+        self.assert_point_close(marker.points[1], [1.0, 5.0, -2.0])
 
     def test_invalid_root_deletes_stale_person_markers(self):
         row = self.row_with_root(1, [1.0, 2.0, 3.0])

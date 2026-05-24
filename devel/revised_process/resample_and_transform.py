@@ -477,13 +477,25 @@ def build_dataset(session_dir, calib_path):
     return df_ml[ordered_final_columns(df_ml.columns)]
 
 
+def normalized_dir(path):
+    return os.path.normpath(os.path.abspath(os.path.expanduser(path)))
+
+
+def normalized_path(path):
+    return os.path.normpath(os.path.abspath(os.path.expanduser(path)))
+
+
 def resolve_calib_path(session_dir, explicit_path):
-    candidates = []
+    session_dir = normalized_dir(session_dir)
     if explicit_path:
-        candidates.append(explicit_path)
+        explicit_path = normalized_path(explicit_path)
+        return explicit_path if os.path.exists(explicit_path) else None
+
+    candidates = []
     candidates.append(os.path.join(session_dir, "calib_data", "multicam_calibration.npz"))
     candidates.append(os.path.join(session_dir, "multicam_calibration.npz"))
     candidates.append(os.path.join(os.path.dirname(session_dir), "multicam_calibration.npz"))
+    candidates.append(os.path.join(os.path.dirname(session_dir), "calib_data", "multicam_calibration.npz"))
 
     for path in candidates:
         if path and os.path.exists(path):
@@ -495,15 +507,26 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--session-dir", type=str, required=True)
     parser.add_argument("--calib-npz", type=str, default=None)
+    parser.add_argument(
+        "--allow-missing-calib",
+        action="store_true",
+        help="Allow identity camera transforms when no calibration NPZ is available.",
+    )
     args = parser.parse_args()
 
+    session_dir = normalized_dir(args.session_dir)
     calib_path = resolve_calib_path(args.session_dir, args.calib_npz)
-    if calib_path is None:
+    if calib_path is None and not args.allow_missing_calib:
+        parser.error(
+            "Calibration file not found. Pass --calib-npz, place multicam_calibration.npz "
+            "next to the session directory, or use --allow-missing-calib for debugging."
+        )
+    if calib_path is None and args.allow_missing_calib:
         print("Warning: Calibration file not found. Identity transforms will be used.")
 
-    df_ml = build_dataset(args.session_dir, calib_path)
+    df_ml = build_dataset(session_dir, calib_path)
 
-    out_path = os.path.join(args.session_dir, "session_ml_dataset.parquet")
+    out_path = os.path.join(session_dir, "session_ml_dataset.parquet")
     df_ml.to_parquet(out_path, engine="pyarrow", index=False)
     print(f"\nSaved ML-ready tabular dataset to: {out_path}")
     print(f"Shape: {df_ml.shape}")

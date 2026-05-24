@@ -45,6 +45,18 @@ class ResampleAndTransformTests(unittest.TestCase):
         self.assertTrue(observed[2])
         self.assertTrue(interpolated[1])
 
+    def test_resolve_calib_path_handles_trailing_session_slash(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            session_dir = root / "session_001"
+            session_dir.mkdir()
+            calib_path = root / "multicam_calibration.npz"
+            np.savez(calib_path, R_2_to_ref=np.eye(3), t_2_to_ref=np.zeros(3))
+
+            resolved = rt.resolve_calib_path(str(session_dir) + "/", None)
+
+            self.assertEqual(Path(resolved), calib_path)
+
     def test_mapping_hip_root_provenance_and_schema(self):
         with tempfile.TemporaryDirectory() as tmp:
             session_dir = Path(tmp)
