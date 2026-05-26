@@ -33,6 +33,45 @@ class ExtractPoseIndependentTests(unittest.TestCase):
 
         np.testing.assert_array_equal(aligned, depth)
 
+
+    def test_cam1_default_bbox_excludes_rightmost_fifth(self):
+        self.assertEqual(epi.default_pose_bbox(1, 1280, 720), [0.0, 0.0, 1023.0, 719.0])
+        self.assertEqual(epi.default_pose_bbox(2, 1280, 720), [0.0, 0.0, 1279.0, 719.0])
+
+
+    def test_default_pose_model_paths_use_valid_model_dirs(self):
+        cfg, ckpt = epi.default_model_paths('/repo', epi.POSE_MODEL_RTMPOSE2D)
+        self.assertIn('/repo/models/pose/rtmw2d/', cfg)
+        self.assertIn('/repo/models/pose/rtmw2d/', ckpt)
+        self.assertIn('rtmpose-l_', cfg)
+
+        cfg, ckpt = epi.default_model_paths('/repo', epi.POSE_MODEL_RTMW3D)
+        self.assertIn('/repo/models/pose/rtmw3d/', cfg)
+        self.assertIn('/repo/models/pose/rtmw3d/', ckpt)
+        self.assertIn('rtmw3d-l_', cfg)
+
+    def test_cam1_foreground_rejection_uses_depth_and_area(self):
+        close_stats = {
+            "body_valid_keypoints": 8,
+            "body_median_depth_m": 0.5,
+            "body_bbox_area_px": 10.0,
+        }
+        self.assertEqual(
+            epi.rejection_reason(1, close_stats, 1280, 720, 0.7, 0.32),
+            "cam1_foreground_depth",
+        )
+
+        large_stats = {
+            "body_valid_keypoints": 8,
+            "body_median_depth_m": 1.2,
+            "body_bbox_area_px": 400000.0,
+        }
+        self.assertEqual(
+            epi.rejection_reason(1, large_stats, 1280, 720, 0.7, 0.32),
+            "cam1_foreground_bbox",
+        )
+        self.assertEqual(epi.rejection_reason(2, large_stats, 1280, 720, 0.7, 0.32), "")
+
     def test_depth_projector_uses_color_intrinsics_for_aligned_depth(self):
         cam_meta = {
             "intrinsics": {

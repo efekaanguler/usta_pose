@@ -62,6 +62,29 @@ class RevisedVisualizeRvizTests(unittest.TestCase):
         np.testing.assert_allclose(rv.rotate_for_rviz([1.0, 2.0, 3.0]), [1.0, 3.0, -2.0])
         self.assertAlmostEqual(float(np.linalg.det(rv.RVIZ_DISPLAY_ROTATION)), 1.0)
 
+
+    def test_static_world_anchor_transform_uses_world_parent(self):
+        tf_msg = rv.make_static_transform(rv.WORLD_FRAME, rv.WORLD_ANCHOR_FRAME)
+
+        self.assertEqual(tf_msg.header.frame_id, rv.WORLD_FRAME)
+        self.assertEqual(tf_msg.child_frame_id, rv.WORLD_ANCHOR_FRAME)
+        self.assertAlmostEqual(tf_msg.transform.rotation.w, 1.0)
+
+    def test_resolve_calib_path_finds_parent_session_calibration(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            session_dir = root / "session_001"
+            session_dir.mkdir()
+            parquet_path = session_dir / "session_ml_dataset.parquet"
+            calib_path = root / "multicam_calibration.npz"
+            parquet_path.write_text("placeholder")
+            calib_path.write_text("placeholder")
+
+            self.assertEqual(
+                rv.resolve_calib_path(session_dir=str(session_dir), parquet_path=str(parquet_path)),
+                str(calib_path),
+            )
+
     def test_generated_joint_marker_points_are_rotated_for_rviz(self):
         node = rv.VisualizerNode.__new__(rv.VisualizerNode)
         node.fps = 30.0

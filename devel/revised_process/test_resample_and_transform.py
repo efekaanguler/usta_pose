@@ -45,6 +45,48 @@ class ResampleAndTransformTests(unittest.TestCase):
         self.assertTrue(observed[2])
         self.assertTrue(interpolated[1])
 
+
+    def test_interpolation_does_not_cross_long_gaps_or_fill_edges(self):
+        source_times = np.array([100.0, 1000.0])
+        target_times = np.array([0.0, 100.0, 500.0, 1000.0, 1100.0])
+
+        values, observed, interpolated = rt.interpolate_series(
+            source_times,
+            np.array([1.0, 2.0]),
+            target_times,
+            max_gap_ms=150.0,
+            observed_tolerance_ms=1e-4,
+        )
+
+        self.assertTrue(np.isnan(values[0]))
+        self.assertAlmostEqual(values[1], 1.0)
+        self.assertTrue(np.isnan(values[2]))
+        self.assertAlmostEqual(values[3], 2.0)
+        self.assertTrue(np.isnan(values[4]))
+        self.assertTrue(observed[1])
+        self.assertFalse(interpolated[2])
+
+    def test_robust_root_falls_back_to_shoulders_when_hips_missing(self):
+        world = {k: np.full((1, 3), np.nan, dtype=float) for k in range(rt.NUM_KEYPOINTS)}
+        world[5][0] = [0.0, 0.0, 1.0]
+        world[6][0] = [0.4, 0.0, 1.0]
+        pose_data = {}
+        for k in range(rt.NUM_KEYPOINTS):
+            pose_data[f"kpt{k}_observed"] = np.array([k in (5, 6)], dtype=bool)
+            pose_data[f"kpt{k}_interpolated"] = np.array([False], dtype=bool)
+
+        root, valid, source, observed, interpolated = rt.compute_robust_root(
+            world,
+            pose_data,
+            np.array([0.0]),
+        )
+
+        self.assertTrue(valid[0])
+        self.assertEqual(source[0], rt.ROOT_SOURCE_SHOULDERS)
+        self.assertTrue(observed[0])
+        self.assertFalse(interpolated[0])
+        np.testing.assert_allclose(root[0], [0.2, 0.0, 1.0])
+
     def test_resolve_calib_path_handles_trailing_session_slash(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -88,14 +130,15 @@ class ResampleAndTransformTests(unittest.TestCase):
             self.assertEqual(set(df["p2_gaze_cam_id"].unique()), {3})
 
             self.assertTrue(df.loc[0, "p1_root_valid"])
-            self.assertAlmostEqual(df.loc[0, "p1_root_x"], 11.0)
-            self.assertAlmostEqual(df.loc[0, "p1_kpt0_rel_x"], 3.0)
+            self.assertEqual(df.loc[0, "p1_root_source"], rt.ROOT_SOURCE_HIPS)
+            self.assertAlmostEqual(df.loc[0, "p1_root_x"], 10.15)
+            self.assertAlmostEqual(df.loc[0, "p1_kpt0_rel_x"], 0.25)
             self.assertAlmostEqual(df.loc[0, "p1_kpt0_rel_y"], 3.0)
 
             self.assertTrue(df.loc[1, "p1_root_valid"])
             self.assertFalse(df.loc[1, "p1_left_hip_observed"])
             self.assertTrue(df.loc[1, "p1_left_hip_interpolated"])
-            self.assertAlmostEqual(df.loc[1, "p1_root_x"], 12.0)
+            self.assertAlmostEqual(df.loc[1, "p1_root_x"], 10.18)
 
             self.assertFalse(df.loc[0, "p2_root_valid"])
             self.assertTrue(np.isnan(df.loc[0, "p2_root_x"]))
@@ -135,10 +178,11 @@ class ResampleAndTransformTests(unittest.TestCase):
 
         rows = []
         for idx, timestamp in enumerate(times):
-            left_x = root_start + idx
-            right_x = root_start + idx + 2.0
+            base_x = root_start + idx * 0.03
+            left_x = base_x
+            right_x = base_x + 0.3
             row = {"frame_idx": idx, "hw_timestamp_ms": timestamp}
-            row.update(self._kpt_fields(0, root_start + idx + 4.0, 3.0, 0.0, 0.9))
+            row.update(self._kpt_fields(0, base_x + 0.4, 3.0, 0.0, 0.9))
             if left_hip_missing_middle and idx == 1:
                 row.update(self._kpt_fields(11, "", "", "", 0.9))
             else:

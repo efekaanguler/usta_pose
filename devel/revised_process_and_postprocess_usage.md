@@ -67,13 +67,36 @@ The pipeline runs three steps:
 
 1. Pose extraction for `cam1` and `cam2`
 2. Gaze extraction for `cam3` and `cam4`
-3. Resampling, smoothing, calibration transform, and root-relative export
+3. Adaptive-FPS resampling, short-gap smoothing/interpolation, calibration transform, and robust root-relative export
 
 The final output is written to:
 
 ```text
 <SESSION_DIR>/session_ml_dataset.parquet
 ```
+
+Pose extraction defaults to RTMPose-L 2D from `models/pose/rtmw2d/` because
+metric depth deprojection depends on reliable image-space keypoints. RTMW3D is
+available with `POSE_MODEL=rtmw3d`, but broad/full-frame RTMW3D boxes are not
+reliable for metric deprojection; the extractor requires a tight
+`POSE_BBOX_CAM#` before using that mode. If no `POSE_BBOX_CAM1` is provided, cam1 automatically excludes the
+rightmost one fifth of the image to avoid the near cam2 subject entering cam1.
+Cam1 also rejects close/oversized foreground detections by default; use
+`--disable-foreground-rejection` only for debugging.
+
+The resampling stage estimates output FPS from usable timestamps instead of
+forcing 30 FPS. Override it only when needed:
+
+```bash
+python3 devel/revised_process/resample_and_transform.py \
+  --session-dir /path/to/session_YYYYMMDD_HHMMSS \
+  --target-fps 24 \
+  --max-interp-gap-ms 150
+```
+
+Interpolation is intentionally limited to short gaps and does not fill before
+the first valid observation or after the last valid observation. Root metadata
+uses numeric source codes: `0=missing`, `1=hips`, `2=torso`, `3=shoulders`.
 
 Intermediate outputs are written next to each camera:
 
@@ -112,7 +135,45 @@ python3 devel/revised_process/resample_and_transform.py \
 If no calibration file is found, identity transforms are used. For correct
 multi-camera geometry, provide `multicam_calibration.npz`.
 
-## 2. Postprocess Locally and View in RViz2
+## 2. Create the Interaction Parquet
+
+After `session_ml_dataset.parquet` is generated, create the RViz-aligned dyadic
+interaction dataset locally:
+
+```bash
+python3 devel/postprocess/create_interaction_parquet.py \
+  --session-dir /path/to/session_YYYYMMDD_HHMMSS
+```
+
+This writes:
+
+```text
+<SESSION_DIR>/session_interaction_dataset.parquet
+```
+
+All coordinates in this derived file use the same display convention as RViz2:
+`x=world_x`, `y=world_z`, `z=-world_y`, so `+z` is up. The file includes
+absolute keypoints, person-relative keypoints, dyad-relative keypoints, gaze
+relations, distance/motion features, quality flags, and flattened calibration
+metadata.
+
+To process and collect many raw sessions into dataset-level folders, run:
+
+```bash
+python3 devel/postprocess/collect_dataset_parquets.py /path/to/dataset_root --require-four
+```
+
+The collector discovers every `session_YYYYMMDD_HHMMSS` folder, runs
+`devel/revised_process/run_revised_pipeline.sh` when `session_ml_dataset.parquet`
+is missing, then writes default pipeline parquets to `default_parquets/` and
+RViz-aligned interaction parquets to `final_dataset_parquets/`. Session folders
+are ordered within their direct parent by timestamp, and output names use
+`YYYYMMDD_HHMMSS_orderN.parquet`. Use `--dry-run` to inspect work without
+running the pipeline, `--skip-processing` to require already generated default
+parquets, and `--force-reprocess` to rerun the revised pipeline for every
+session.
+
+## 3. Postprocess Locally and View in RViz2
 
 Run the postprocess visualization on the local machine, not inside the Docker
 preprocessing environment. The postprocess script reads
@@ -145,7 +206,7 @@ python3 devel/postprocess/revised_visualize_rviz.py \
   --fps 30
 ```
 
-## 3. Launch RViz2 in a Separate Terminal
+## 4. Launch RViz2 in a Separate Terminal
 
 Open a second local terminal while the postprocess script is still running:
 

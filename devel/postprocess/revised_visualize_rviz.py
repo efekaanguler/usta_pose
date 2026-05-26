@@ -88,6 +88,7 @@ except ImportError:
 
 NUM_KEYPOINTS = 133
 WORLD_FRAME = "world"
+WORLD_ANCHOR_FRAME = "world_anchor"
 RVIZ_DISPLAY_ROTATION = np.array([
     [1.0, 0.0, 0.0],
     [0.0, 0.0, 1.0],
@@ -321,6 +322,52 @@ def resolve_parquet_path(parquet_path=None, session_dir=None):
     raise ValueError("Either --parquet or --session-dir must be provided.")
 
 
+def resolve_calib_path(calib_path=None, session_dir=None, parquet_path=None):
+    if calib_path:
+        return calib_path if os.path.exists(calib_path) else None
+
+    candidates = []
+    if session_dir:
+        session_dir = os.path.abspath(os.path.expanduser(session_dir))
+        candidates.extend([
+            os.path.join(session_dir, "multicam_calibration.npz"),
+            os.path.join(session_dir, "calib_data", "multicam_calibration.npz"),
+            os.path.join(os.path.dirname(session_dir), "multicam_calibration.npz"),
+            os.path.join(os.path.dirname(session_dir), "calib_data", "multicam_calibration.npz"),
+        ])
+    if parquet_path:
+        parquet_dir = os.path.dirname(os.path.abspath(os.path.expanduser(parquet_path)))
+        candidates.extend([
+            os.path.join(parquet_dir, "multicam_calibration.npz"),
+            os.path.join(parquet_dir, "calib_data", "multicam_calibration.npz"),
+            os.path.join(os.path.dirname(parquet_dir), "multicam_calibration.npz"),
+            os.path.join(os.path.dirname(parquet_dir), "calib_data", "multicam_calibration.npz"),
+        ])
+
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def make_static_transform(parent_frame, child_frame, stamp=None, translation=None, quaternion=None):
+    translation = translation if translation is not None else (0.0, 0.0, 0.0)
+    quaternion = quaternion if quaternion is not None else (0.0, 0.0, 0.0, 1.0)
+
+    tf_msg = TransformStamped()
+    tf_msg.header.stamp = stamp
+    tf_msg.header.frame_id = parent_frame
+    tf_msg.child_frame_id = child_frame
+    tf_msg.transform.translation.x = float(translation[0])
+    tf_msg.transform.translation.y = float(translation[1])
+    tf_msg.transform.translation.z = float(translation[2])
+    tf_msg.transform.rotation.x = float(quaternion[0])
+    tf_msg.transform.rotation.y = float(quaternion[1])
+    tf_msg.transform.rotation.z = float(quaternion[2])
+    tf_msg.transform.rotation.w = float(quaternion[3])
+    return tf_msg
+
+
 def validate_revised_schema(df):
     columns = set(df.columns)
     if any(column.startswith("cam") for column in columns):
@@ -368,11 +415,24 @@ class VisualizerNode(Node):
         self.rows = self.df.to_dict("records")
         self.get_logger().info(f"Loaded {len(self.rows)} frames from {parquet_path}")
 
+        self.publish_world_anchor_tf()
         if calib_path:
             self.publish_static_tfs(calib_path)
+        else:
+            self.get_logger().warning(
+                "No calibration NPZ found/provided; publishing only the world anchor TF."
+            )
 
         self.frame_idx = 0
         self.timer = self.create_timer(1.0 / fps, self.timer_callback)
+
+    def publish_world_anchor_tf(self):
+        """Publish a static child so RViz recognizes the fixed `world` frame."""
+        stamp = self.get_clock().now().to_msg()
+        self.tf_static_broadcaster.sendTransform([
+            make_static_transform(WORLD_FRAME, WORLD_ANCHOR_FRAME, stamp=stamp)
+        ])
+        self.get_logger().info(f"Published static {WORLD_FRAME} -> {WORLD_ANCHOR_FRAME} TF")
 
     def publish_static_tfs(self, calib_path):
         """Publish stored ref -> camera transforms for RViz display only."""
@@ -394,18 +454,16 @@ class VisualizerNode(Node):
                     continue
 
                 quaternion = matrix_to_quaternion(rotation_ref_to_cam)
-                tf_msg = TransformStamped()
-                tf_msg.header.stamp = self.get_clock().now().to_msg()
-                tf_msg.header.frame_id = WORLD_FRAME
-                tf_msg.child_frame_id = f"cam{cam_id}"
-                tf_msg.transform.translation.x = float(translation_ref_to_cam[0])
-                tf_msg.transform.translation.y = float(translation_ref_to_cam[1])
-                tf_msg.transform.translation.z = float(translation_ref_to_cam[2])
-                tf_msg.transform.rotation.x = quaternion[0]
-                tf_msg.transform.rotation.y = quaternion[1]
-                tf_msg.transform.rotation.z = quaternion[2]
-                tf_msg.transform.rotation.w = quaternion[3]
-                tfs.append(tf_msg)
+                stamp = self.get_clock().now().to_msg()
+                tfs.append(
+                    make_static_transform(
+                        WORLD_FRAME,
+                        f"cam{cam_id}",
+                        stamp=stamp,
+                        translation=translation_ref_to_cam,
+                        quaternion=quaternion,
+                    )
+                )
 
             if tfs:
                 self.tf_static_broadcaster.sendTransform(tfs)
@@ -567,6 +625,10 @@ def main():
     if not os.path.exists(parquet_path):
         parser.error(f"Parquet file not found: {parquet_path}")
 
+    calib_path = resolve_calib_path(args.calib, args.session_dir, parquet_path)
+    if args.calib and calib_path is None:
+        parser.error(f"Calibration file not found: {args.calib}")
+
     if rclpy is None:
         print("ROS2 Python packages are required to run this visualizer.", file=sys.stderr)
         return 1
@@ -574,7 +636,7 @@ def main():
     rclpy.init()
     node = VisualizerNode(
         parquet_path,
-        calib_path=args.calib,
+        calib_path=calib_path,
         fps=args.fps,
         gaze_length=args.gaze_length,
     )

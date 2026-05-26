@@ -2,10 +2,12 @@
 """
 Step 1: Independent Pose Processing (Cam-Specific)
 
-Runs RTMPose-L wholebody (133 keypoints, 2D) on ALL frames of a single pose
-camera based on its hardware timestamps. Deprojects each keypoint to 3D 
-in the LOCAL CAMERA FRAME using the depth.mkv video.
-NO global transformation is applied at this stage.
+Runs a selectable top-down wholebody pose model on ALL frames of a single
+pose camera based on its hardware timestamps. The default is RTMPose-L 2D
+because metric depth deprojection requires reliable image-space keypoints.
+RTMW3D remains available explicitly, but it should be used only with a tight
+person bbox for this depth-deprojection path. NO global transformation is
+applied at this stage.
 
 Usage:
     python extract_pose_independent.py \
@@ -26,17 +28,62 @@ import cv2
 import numpy as np
 from tqdm import tqdm
 
+
+NUM_KEYPOINTS = 133
+MIN_KEYPOINT_SCORE = 0.3
+CAM1_DEFAULT_RIGHT_CROP_FRACTION = 0.2
+CAM1_REJECT_CLOSE_DEPTH_M = 0.7
+CAM1_REJECT_MAX_BODY_AREA_RATIO = 0.32
+BODY_KEYPOINTS = tuple(range(17))
+POSE_MODEL_RTMPOSE2D = "rtmpose2d"
+POSE_MODEL_RTMW3D = "rtmw3d"
+SUPPORTED_POSE_MODELS = (POSE_MODEL_RTMPOSE2D, POSE_MODEL_RTMW3D)
+
+
+def default_model_paths(project_root, pose_model):
+    if pose_model == POSE_MODEL_RTMPOSE2D:
+        model_dir = os.path.join(project_root, "models", "pose", "rtmw2d")
+        return (
+            os.path.join(model_dir, "rtmpose-l_8xb32-270e_coco-wholebody-384x288.py"),
+            os.path.join(model_dir, "rtmpose-l_simcc-coco-wholebody_pt-aic-coco_270e-384x288-eaeb96c8_20230125.pth"),
+        )
+    if pose_model == POSE_MODEL_RTMW3D:
+        model_dir = os.path.join(project_root, "models", "pose", "rtmw3d")
+        return (
+            os.path.join(model_dir, "rtmw3d-l_8xb64_cocktail14-384x288.py"),
+            os.path.join(model_dir, "rtmw3d-l_8xb64_cocktail14-384x288-794dbc78_20240626.pth"),
+        )
+    raise ValueError(f"Unsupported pose model: {pose_model}")
+
 # ---------------------------------------------------------------------------
 # MMPose imports (deferred so --help works without torch)
 # ---------------------------------------------------------------------------
 _mmpose_loaded = False
 
-def _ensure_mmpose():
+def _ensure_mmpose(project_root=None, require_rtmw3d=False):
     global _mmpose_loaded
-    if _mmpose_loaded:
+    if _mmpose_loaded and not require_rtmw3d:
         return
+    if require_rtmw3d:
+        rtmpose3d_candidates = [
+            os.environ.get("RTMPOSE3D_PROJECT_DIR"),
+            "/workspace/mmpose/projects/rtmpose3d",
+        ]
+        if project_root:
+            rtmpose3d_candidates.append(os.path.join(project_root, "mmpose", "projects", "rtmpose3d"))
+        for candidate in rtmpose3d_candidates:
+            if candidate and os.path.isdir(candidate) and candidate not in sys.path:
+                sys.path.insert(0, candidate)
     try:
         from mmpose.utils import register_all_modules
+        if require_rtmw3d:
+            try:
+                import rtmpose3d  # noqa: F401
+            except ImportError:
+                print(
+                    "Warning: rtmpose3d custom module not found. Set "
+                    "RTMPOSE3D_PROJECT_DIR if init_model cannot import it."
+                )
         register_all_modules()
         _mmpose_loaded = True
     except ImportError:
@@ -235,6 +282,96 @@ def deproject_pixel_to_3d(x, y, depth_image, K, depth_scale, patch_radius=2):
     return np.array([X, Y, Z])
 
 
+def normalize_model_outputs(pred_instances):
+    keypoints = np.asarray(pred_instances.keypoints, dtype=np.float64)
+    keypoints = np.squeeze(keypoints)
+    if keypoints.ndim != 2 or keypoints.shape[0] < NUM_KEYPOINTS:
+        return None, None
+
+    scores = getattr(pred_instances, "keypoint_scores", None)
+    if scores is None:
+        scores = np.ones(keypoints.shape[0], dtype=np.float64)
+    else:
+        scores = np.asarray(scores, dtype=np.float64)
+        scores = np.squeeze(scores)
+        if scores.ndim != 1 or scores.shape[0] < NUM_KEYPOINTS:
+            scores = np.ones(keypoints.shape[0], dtype=np.float64)
+
+    return keypoints[:NUM_KEYPOINTS], scores[:NUM_KEYPOINTS]
+
+
+def default_pose_bbox(cam_id, width, height):
+    if cam_id == 1:
+        x2 = float(int(round(width * (1.0 - CAM1_DEFAULT_RIGHT_CROP_FRACTION))) - 1)
+        return [0.0, 0.0, max(0.0, x2), float(height - 1)]
+    return [0.0, 0.0, float(width - 1), float(height - 1)]
+
+
+def set_empty_keypoints(row, scores=None):
+    for kpt_i in range(NUM_KEYPOINTS):
+        for axis in ('x', 'y', 'z'):
+            row[f'kpt{kpt_i}_{axis}'] = ''
+        if scores is not None and kpt_i < len(scores) and np.isfinite(scores[kpt_i]):
+            row[f'kpt{kpt_i}_score'] = round(float(scores[kpt_i]), 4)
+        else:
+            row[f'kpt{kpt_i}_score'] = ''
+
+
+def pose_quality_stats(keypoints_2d, scores, local_points, frame_width, frame_height):
+    body_idx = np.array(BODY_KEYPOINTS, dtype=np.int32)
+    body_scores = scores[body_idx]
+    body_points = local_points[body_idx]
+    body_pixels = keypoints_2d[body_idx, :2]
+
+    body_valid_3d = (
+        np.isfinite(body_scores)
+        & (body_scores >= MIN_KEYPOINT_SCORE)
+        & np.all(np.isfinite(body_points), axis=1)
+    )
+    body_valid_2d = (
+        np.isfinite(body_scores)
+        & (body_scores >= MIN_KEYPOINT_SCORE)
+        & np.all(np.isfinite(body_pixels), axis=1)
+        & (body_pixels[:, 0] >= 0.0)
+        & (body_pixels[:, 0] < frame_width)
+        & (body_pixels[:, 1] >= 0.0)
+        & (body_pixels[:, 1] < frame_height)
+    )
+
+    median_depth = np.nan
+    if np.any(body_valid_3d):
+        median_depth = float(np.nanmedian(body_points[body_valid_3d, 2]))
+
+    bbox_area = np.nan
+    if np.sum(body_valid_2d) >= 5:
+        valid_pixels = body_pixels[body_valid_2d]
+        bbox_w = float(np.nanmax(valid_pixels[:, 0]) - np.nanmin(valid_pixels[:, 0]))
+        bbox_h = float(np.nanmax(valid_pixels[:, 1]) - np.nanmin(valid_pixels[:, 1]))
+        bbox_area = bbox_w * bbox_h
+
+    return {
+        "body_valid_keypoints": int(np.sum(body_valid_3d)),
+        "body_median_depth_m": median_depth,
+        "body_bbox_area_px": bbox_area,
+    }
+
+
+def rejection_reason(cam_id, stats, frame_width, frame_height, reject_close_depth_m, reject_max_body_area_ratio):
+    if cam_id != 1:
+        return ""
+
+    valid_count = stats["body_valid_keypoints"]
+    median_depth = stats["body_median_depth_m"]
+    bbox_area = stats["body_bbox_area_px"]
+    max_area = float(frame_width * frame_height) * reject_max_body_area_ratio
+
+    if valid_count >= 5 and np.isfinite(median_depth) and median_depth < reject_close_depth_m:
+        return "cam1_foreground_depth"
+    if valid_count >= 5 and np.isfinite(bbox_area) and bbox_area > max_area:
+        return "cam1_foreground_bbox"
+    return ""
+
+
 # ---------------------------------------------------------------------------
 # Frame seeking helpers
 # ---------------------------------------------------------------------------
@@ -292,23 +429,41 @@ class DepthFrameReader:
 # Main processing
 # ---------------------------------------------------------------------------
 
-def process_camera(session_dir, cam_id, cfg_path, ckpt_path, device, bbox_xyxy=None):
-    """Run RTMPose-L on a single pose camera and deproject keypoints to local 3D."""
+def process_camera(
+    session_dir,
+    cam_id,
+    cfg_path,
+    ckpt_path,
+    device,
+    bbox_xyxy=None,
+    foreground_rejection=True,
+    reject_close_depth_m=CAM1_REJECT_CLOSE_DEPTH_M,
+    reject_max_body_area_ratio=CAM1_REJECT_MAX_BODY_AREA_RATIO,
+    pose_model=POSE_MODEL_RTMPOSE2D,
+):
+    """Run the selected pose model and deproject image keypoints to local 3D."""
 
     import torch
     from mmpose.apis import init_model, inference_topdown
 
-    _ensure_mmpose()
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(script_dir))
+    _ensure_mmpose(project_root, require_rtmw3d=(pose_model == POSE_MODEL_RTMW3D))
 
-    # Load model
     model = init_model(cfg_path, ckpt_path, device=device)
-    print(f"RTMPose-L model loaded on {device}")
+    if pose_model == POSE_MODEL_RTMW3D:
+        try:
+            model.cfg.model.test_cfg.mode = "vis"
+        except Exception:
+            pass
+        print("Warning: RTMW3D metric deprojection is unreliable with broad/full-frame bboxes. Use a tight --bbox.")
+    model_label = "RTMW3D" if pose_model == POSE_MODEL_RTMW3D else "RTMPose-L 2D"
+    print(f"{model_label} model loaded on {device}")
 
-    # Load metadata for intrinsics
     meta_path = os.path.join(session_dir, "metadata.json")
     if not os.path.exists(meta_path):
         meta_path = os.path.join(os.path.dirname(session_dir), "metadata.json")
-        
+
     with open(meta_path, 'r') as f:
         meta = json.load(f)
 
@@ -324,7 +479,7 @@ def process_camera(session_dir, cam_id, cfg_path, ckpt_path, device, bbox_xyxy=N
 
     cam_dir = os.path.join(session_dir, f"cam{cam_id}")
     ts_csv_path = os.path.join(cam_dir, f"cam{cam_id}_color_timestamps.csv")
-    
+
     if not os.path.exists(ts_csv_path):
         raise FileNotFoundError(f"Timestamps file not found: {ts_csv_path}")
 
@@ -334,8 +489,13 @@ def process_camera(session_dir, cam_id, cfg_path, ckpt_path, device, bbox_xyxy=N
 
     w = int(color_reader.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     h = int(color_reader.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    if pose_model == POSE_MODEL_RTMW3D and bbox_xyxy is None:
+        raise ValueError(
+            "RTMW3D metric deprojection requires an explicit tight --bbox; "
+            "broad/default boxes produced invalid metric skeletons."
+        )
     if bbox_xyxy is None:
-        bbox_values = [0.0, 0.0, float(w - 1), float(h - 1)]
+        bbox_values = default_pose_bbox(cam_id, w, h)
     else:
         x1, y1, x2, y2 = bbox_xyxy
         bbox_values = [
@@ -348,58 +508,91 @@ def process_camera(session_dir, cam_id, cfg_path, ckpt_path, device, bbox_xyxy=N
             raise ValueError(f"Invalid bbox for cam {cam_id}: {bbox_xyxy}")
     bbox = np.array([bbox_values], dtype=np.float32)
     print(f"Cam {cam_id}: pose bbox xyxy={bbox_values}")
+    if cam_id == 1 and bbox_xyxy is None:
+        print("Cam 1: default ROI excludes the rightmost 1/5 of the image.")
+    if cam_id == 1 and foreground_rejection:
+        print(
+            "Cam 1: foreground rejection enabled "
+            f"(depth < {reject_close_depth_m:.2f}m or body area > "
+            f"{reject_max_body_area_ratio:.2f} of frame)."
+        )
 
-    NUM_KEYPOINTS = 133
     results = []
 
     for row in tqdm(timestamps, desc=f"Pose processing Cam {cam_id}"):
         frame_idx = row['frame_idx']
         hw_ts = row['hw_timestamp_ms']
-        
+
         result_row = {
             'frame_idx': frame_idx,
-            'hw_timestamp_ms': hw_ts
+            'hw_timestamp_ms': hw_ts,
+            'pose_rejected': 0,
+            'pose_reject_reason': '',
+            'body_valid_keypoints': '',
+            'body_median_depth_m': '',
+            'body_bbox_area_px': '',
         }
 
-        # Read frames
         color_frame = color_reader.read_frame(frame_idx)
         depth_frame = depth_reader.read_frame(frame_idx)
         depth_reader.clear_cache_before(frame_idx - 5)
         depth_for_color = depth_projector.depth_for_color(depth_frame) if depth_frame is not None else None
 
         if color_frame is None:
-            # Fill NaN for all keypoints
-            for kpt_i in range(NUM_KEYPOINTS):
-                for axis in ('x', 'y', 'z', 'score'):
-                    result_row[f'kpt{kpt_i}_{axis}'] = ''
+            set_empty_keypoints(result_row)
             results.append(result_row)
             continue
 
-        # Run inference
         rgb_frame = cv2.cvtColor(color_frame, cv2.COLOR_BGR2RGB)
         pose_results = inference_topdown(model, rgb_frame, bboxes=bbox)
 
         if not pose_results or pose_results[0].pred_instances is None:
-            for kpt_i in range(NUM_KEYPOINTS):
-                for axis in ('x', 'y', 'z', 'score'):
-                    result_row[f'kpt{kpt_i}_{axis}'] = ''
+            set_empty_keypoints(result_row)
             results.append(result_row)
             continue
 
         pred = pose_results[0].pred_instances
-        keypoints_2d = pred.keypoints[0]  # (133, 2) or (133, 3)
-        scores = pred.keypoint_scores[0] if pred.keypoint_scores.ndim > 1 else pred.keypoint_scores
+        keypoints, scores = normalize_model_outputs(pred)
+        if keypoints is None or scores is None:
+            set_empty_keypoints(result_row)
+            results.append(result_row)
+            continue
 
-        # Deproject each keypoint
+        local_points = np.full((NUM_KEYPOINTS, 3), np.nan, dtype=np.float64)
         for kpt_i in range(NUM_KEYPOINTS):
-            px, py = keypoints_2d[kpt_i, 0], keypoints_2d[kpt_i, 1]
+            px, py = keypoints[kpt_i, 0], keypoints[kpt_i, 1]
             score = float(scores[kpt_i]) if kpt_i < len(scores) else 0.0
 
-            # DO NOT TRANSFORM TO GLOBAL (LOCAL CAMERA FRAME ONLY)
-            if depth_for_color is not None and score > 0.3:
-                p3d_cam = deproject_pixel_to_3d(px, py, depth_for_color, K, depth_scale)
-            else:
-                p3d_cam = np.array([np.nan, np.nan, np.nan])
+            if depth_for_color is not None and score >= MIN_KEYPOINT_SCORE:
+                local_points[kpt_i] = deproject_pixel_to_3d(px, py, depth_for_color, K, depth_scale)
+
+        stats = pose_quality_stats(keypoints, scores, local_points, w, h)
+        result_row['body_valid_keypoints'] = stats["body_valid_keypoints"]
+        if np.isfinite(stats["body_median_depth_m"]):
+            result_row['body_median_depth_m'] = round(stats["body_median_depth_m"], 6)
+        if np.isfinite(stats["body_bbox_area_px"]):
+            result_row['body_bbox_area_px'] = round(stats["body_bbox_area_px"], 3)
+
+        reason = ""
+        if foreground_rejection:
+            reason = rejection_reason(
+                cam_id,
+                stats,
+                w,
+                h,
+                reject_close_depth_m,
+                reject_max_body_area_ratio,
+            )
+        if reason:
+            result_row['pose_rejected'] = 1
+            result_row['pose_reject_reason'] = reason
+            set_empty_keypoints(result_row, scores=scores)
+            results.append(result_row)
+            continue
+
+        for kpt_i in range(NUM_KEYPOINTS):
+            p3d_cam = local_points[kpt_i]
+            score = float(scores[kpt_i]) if kpt_i < len(scores) else 0.0
 
             result_row[f'kpt{kpt_i}_x'] = round(p3d_cam[0], 6) if not np.isnan(p3d_cam[0]) else ''
             result_row[f'kpt{kpt_i}_y'] = round(p3d_cam[1], 6) if not np.isnan(p3d_cam[1]) else ''
@@ -408,16 +601,14 @@ def process_camera(session_dir, cam_id, cfg_path, ckpt_path, device, bbox_xyxy=N
 
         results.append(result_row)
 
-    # Cleanup
     color_reader.close()
     depth_reader.close()
 
     return results
 
-
 def main():
     parser = argparse.ArgumentParser(
-        description="Run RTMW2D pose on all frames independently (Local Coords)",
+        description="Run pose on all frames independently (Local Coords)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     parser.add_argument('--session-dir', type=str, required=True)
@@ -426,12 +617,35 @@ def main():
     parser.add_argument('--ckpt-path', type=str, default=None)
     parser.add_argument('--device', type=str, default=None)
     parser.add_argument(
+        '--pose-model',
+        choices=SUPPORTED_POSE_MODELS,
+        default=os.environ.get('POSE_MODEL', POSE_MODEL_RTMPOSE2D),
+        help='Pose backbone used for image-space keypoints before depth deprojection.',
+    )
+    parser.add_argument(
         '--bbox',
         type=float,
         nargs=4,
         metavar=('X1', 'Y1', 'X2', 'Y2'),
         default=None,
         help='Optional person-specific ROI in color-image pixel coordinates.',
+    )
+    parser.add_argument(
+        '--disable-foreground-rejection',
+        action='store_true',
+        help='Disable cam1 close/large-body rejection for debugging.',
+    )
+    parser.add_argument(
+        '--reject-close-depth-m',
+        type=float,
+        default=CAM1_REJECT_CLOSE_DEPTH_M,
+        help='Cam1 frame rejection threshold for foreground median body depth.',
+    )
+    parser.add_argument(
+        '--reject-max-body-area-ratio',
+        type=float,
+        default=CAM1_REJECT_MAX_BODY_AREA_RATIO,
+        help='Cam1 frame rejection threshold for projected body bbox area / frame area.',
     )
     args = parser.parse_args()
 
@@ -443,12 +657,10 @@ def main():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     devel_dir = os.path.dirname(script_dir)
     project_root = os.path.dirname(devel_dir)
-    rtmw2d_dir = os.path.join(project_root, "models", "pose", "rtmw2d")
+    default_cfg_path, default_ckpt_path = default_model_paths(project_root, args.pose_model)
 
-    cfg_path = args.cfg_path or os.path.join(
-        rtmw2d_dir, "rtmpose-l_8xb32-270e_coco-wholebody-384x288.py")
-    ckpt_path = args.ckpt_path or os.path.join(
-        rtmw2d_dir, "rtmpose-l_simcc-coco-wholebody_pt-aic-coco_270e-384x288-eaeb96c8_20230125.pth")
+    cfg_path = args.cfg_path or default_cfg_path
+    ckpt_path = args.ckpt_path or default_ckpt_path
 
     # Device
     if args.device:
@@ -462,12 +674,24 @@ def main():
 
     print(f"Session:    {session_dir}")
     print(f"Camera ID:  {cam_id}")
+    print(f"Pose model: {args.pose_model}")
     print(f"Config:     {cfg_path}")
     print(f"Checkpoint: {ckpt_path}")
     print(f"Device:     {device}")
     print()
 
-    results = process_camera(session_dir, cam_id, cfg_path, ckpt_path, device, bbox_xyxy=args.bbox)
+    results = process_camera(
+        session_dir,
+        cam_id,
+        cfg_path,
+        ckpt_path,
+        device,
+        bbox_xyxy=args.bbox,
+        foreground_rejection=not args.disable_foreground_rejection,
+        reject_close_depth_m=args.reject_close_depth_m,
+        reject_max_body_area_ratio=args.reject_max_body_area_ratio,
+        pose_model=args.pose_model,
+    )
 
     # Write output CSV
     if results:

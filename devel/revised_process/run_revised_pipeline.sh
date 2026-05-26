@@ -15,12 +15,14 @@ fi
 
 SESSION_DIR="$1"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+POSE_MODEL="${POSE_MODEL:-rtmpose2d}"
 
 echo "======================================================================="
 echo "  REVISED PROCESS PIPELINE (ML DATASET GENERATOR)"
 echo "======================================================================="
 echo "  Session:    $SESSION_DIR"
 echo "  Script dir: $SCRIPT_DIR"
+echo "  Pose model: $POSE_MODEL"
 echo "======================================================================="
 echo ""
 
@@ -33,19 +35,29 @@ if [ -z "${SKIP_POSE:-}" ]; then
     for cam_id in 1 2; do
         if [ -d "$SESSION_DIR/cam$cam_id" ]; then
             bbox_var="POSE_BBOX_CAM${cam_id}"
-            bbox_args=()
+            pose_args=()
             if [ -n "${!bbox_var:-}" ]; then
                 read -r -a bbox_values <<< "${!bbox_var}"
                 if [ "${#bbox_values[@]}" -ne 4 ]; then
                     echo "Error: ${bbox_var} must contain four values: x1 y1 x2 y2"
                     exit 1
                 fi
-                bbox_args=(--bbox "${bbox_values[@]}")
+                pose_args+=(--bbox "${bbox_values[@]}")
+            fi
+            if [ -n "${POSE_DISABLE_FOREGROUND_REJECTION:-}" ]; then
+                pose_args+=(--disable-foreground-rejection)
+            fi
+            if [ -n "${POSE_REJECT_CLOSE_DEPTH_M:-}" ]; then
+                pose_args+=(--reject-close-depth-m "$POSE_REJECT_CLOSE_DEPTH_M")
+            fi
+            if [ -n "${POSE_REJECT_MAX_BODY_AREA_RATIO:-}" ]; then
+                pose_args+=(--reject-max-body-area-ratio "$POSE_REJECT_MAX_BODY_AREA_RATIO")
             fi
             python3 "$SCRIPT_DIR/extract_pose_independent.py" \
                 --session-dir "$SESSION_DIR" \
                 --cam-id $cam_id \
-                "${bbox_args[@]}"
+                --pose-model "$POSE_MODEL" \
+                "${pose_args[@]}"
         else
             echo "Warning: cam$cam_id directory not found, skipping."
         fi
@@ -81,8 +93,16 @@ if [ -z "${SKIP_RESAMPLE:-}" ]; then
     echo "║  STEP 3 — Savitzky-Golay & Root Relative        ║"
     echo "╚══════════════════════════════════════════════════════╝"
     
+    resample_args=()
+    if [ -n "${TARGET_FPS:-}" ]; then
+        resample_args+=(--target-fps "$TARGET_FPS")
+    fi
+    if [ -n "${MAX_INTERP_GAP_MS:-}" ]; then
+        resample_args+=(--max-interp-gap-ms "$MAX_INTERP_GAP_MS")
+    fi
     python3 "$SCRIPT_DIR/resample_and_transform.py" \
-        --session-dir "$SESSION_DIR"
+        --session-dir "$SESSION_DIR" \
+        "${resample_args[@]}"
 else
     echo "⏭ Skipping Resample and Transform..."
 fi
