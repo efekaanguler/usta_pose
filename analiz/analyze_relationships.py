@@ -191,7 +191,7 @@ for col in norm_profiles.columns:
 
 # Rename columns nicely
 def rename_for_display(c):
-    c = c.replace('p1_', 'Person_A_').replace('p2_', 'Person_B_')
+    c = c.replace('p1_', 'Initiator_').replace('p2_', 'Responder_')
     return c
 
 norm_profiles.columns = [rename_for_display(c) for c in norm_profiles.columns]
