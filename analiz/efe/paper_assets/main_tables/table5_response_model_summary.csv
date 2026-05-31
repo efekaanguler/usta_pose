@@ -1,0 +1,7 @@
+Model family,Best model,Accuracy,Balanced acc.,Macro F1,Top-3 acc.,JS div.,Interpretation
+Majority baseline,Majority,0.203,0.100,0.034,0.523,0.6055,Lower-bound class-prior baseline
+Best actor-only,Hist-GBDT actor only,0.166,0.104,0.096,0.441,0.0731,Actor word alone is weak
+Best actor-history exact/top-3,XGBoost actor history,0.470,0.403,0.429,0.677,0.0163,Best autonomous candidate for exact/top-3 response prediction
+Best actor-history distributional,Random Forest actor history,0.440,0.408,0.398,0.629,0.0025,Best actor-history distribution match
+Best observed-immediate exact,XGBoost observed immediate,0.771,0.739,0.779,0.861,0.0068,Best offline exact response interpretation
+Best observed-immediate distributional,Random Forest observed immediate,0.759,0.751,0.731,0.823,0.0022,Best observed-immediate distribution match

@@ -1,0 +1,9 @@
+Validation item,Value,Interpretation
+Mean missing ratio,0.1967,Across all session-level missingness summaries
+Worst session missing ratio,0.4559,Highest session-level missingness
+Minimum session missing ratio,0.0672,Lowest session-level missingness
+Total timestamp gaps detected,0,Gap threshold from validation output
+Largest temporal gap,0.00 ms,Maximum detected temporal gap
+Mean median frame interval,40.5 ms,Average of per-session median intervals
+Main outlier family,"motion speed and selected keypoint coordinates (top examples: p2_motion_speed, p2_kpt50_world_y, p1_motion_speed)",Z-score and IQR outlier checks
+Interpretation,"Usable dataset, but validity coverage must be considered",Missingness/visibility features remain analytically relevant

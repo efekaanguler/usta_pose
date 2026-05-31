@@ -1,0 +1,11 @@
+Rank,Top z-score feature,Z outlier ratio,Top IQR feature,IQR outlier ratio
+1,p2_motion_speed,0.0158,p2_kpt18_world_y,0.1416
+2,p2_kpt50_world_y,0.0156,p1_kpt16_world_y,0.1093
+3,p1_motion_speed,0.0154,p1_kpt15_world_y,0.1025
+4,p2_kpt40_world_y,0.0153,p1_kpt17_world_y,0.1024
+5,p2_kpt45_world_y,0.0147,p1_kpt16_world_x,0.0987
+6,p2_kpt42_world_y,0.0144,p2_kpt76_world_y,0.0963
+7,p2_kpt51_world_y,0.0142,p2_kpt86_world_y,0.0942
+8,p2_kpt43_world_y,0.0141,p2_kpt20_world_y,0.0928
+9,p2_kpt63_world_y,0.0139,p2_kpt17_world_y,0.0924
+10,p2_kpt62_world_y,0.0139,p2_kpt114_world_y,0.0916

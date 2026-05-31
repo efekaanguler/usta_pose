@@ -1,0 +1,17 @@
+Model,Feature set,N,Classes,Accuracy,Balanced acc.,Macro F1,Top-3 acc.,JS div.
+Majority,baseline,5102,10,0.203,0.100,0.034,0.523,0.6055
+actor markov,actor_word_only,5102,10,0.185,0.097,0.061,0.521,0.3349
+actor history markov,actor_word+previous_response,5102,10,0.448,0.382,0.412,0.641,0.0295
+actor immediate markov,actor_word+immediate_other_word,5102,10,0.709,0.663,0.740,0.810,0.0394
+Logistic actor only,actor_only,5102,10,0.093,0.117,0.091,0.315,0.1567
+Hist-GBDT actor only,actor_only,5102,10,0.166,0.104,0.096,0.441,0.0731
+Random Forest actor only,actor_only,5102,10,0.097,0.108,0.091,0.338,0.1108
+XGBoost actor only,actor_only,5102,10,0.181,0.102,0.076,0.493,0.2150
+Logistic actor history,actor_history,5102,10,0.427,0.425,0.390,0.605,0.0275
+Hist-GBDT actor history,actor_history,5102,10,0.442,0.376,0.401,0.656,0.0166
+Random Forest actor history,actor_history,5102,10,0.440,0.408,0.398,0.629,0.0025
+XGBoost actor history,actor_history,5102,10,0.470,0.403,0.429,0.677,0.0163
+Logistic observed immediate,observed_immediate,5102,10,0.748,0.747,0.702,0.826,0.0084
+Hist-GBDT observed immediate,observed_immediate,5102,10,0.748,0.718,0.757,0.839,0.0058
+Random Forest observed immediate,observed_immediate,5102,10,0.759,0.751,0.731,0.823,0.0022
+XGBoost observed immediate,observed_immediate,5102,10,0.771,0.739,0.779,0.861,0.0068

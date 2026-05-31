@@ -1,0 +1,2 @@
+session_label,file_name,dyad_id,order,n_rows_loaded,duration_s,fps_median,frame_pose_valid_ratio,frame_gaze_valid_ratio,frame_interaction_valid_ratio,window_count,quality_window_count
+20260507_155542_order1,20260507_155542_order1.parquet,dyad_001,1,801,33.3333984375,23.99995312509155,0.8739076154806492,0.7066167290886392,0.8739076154806492,66,60

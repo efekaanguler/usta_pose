@@ -1,0 +1,11 @@
+model,target,status,validation,n_samples,accuracy,balanced_accuracy,macro_f1,swap_consistency
+majority_by_train_fold,competitive_practiced_vs_order1,ok,grouped baseline,6000,0.7768333333333334,0.5,0.43720101303817654,invariant by construction: only symmetric dyad features are used
+logistic_l2,competitive_practiced_vs_order1,ok,leave-one-dyad-out,6000,0.38466666666666666,0.41126237946996025,0.3641410697471112,invariant by construction: only symmetric dyad features are used
+hist_gradient_boosting,competitive_practiced_vs_order1,ok,leave-one-dyad-out,6000,0.7476666666666667,0.4987924363719799,0.4669853645118339,invariant by construction: only symmetric dyad features are used
+random_forest_shallow,competitive_practiced_vs_order1,ok,leave-one-dyad-out,6000,0.4816666666666667,0.4433553877462535,0.42470363296264435,invariant by construction: only symmetric dyad features are used
+majority_by_train_fold,order_1_2_3_4,ok,grouped baseline,6000,0.243,0.19183682505255473,0.1301646609678265,invariant by construction: only symmetric dyad features are used
+logistic_l2,order_1_2_3_4,ok,leave-one-dyad-out,6000,0.21816666666666668,0.22673367413683482,0.21922578035312315,invariant by construction: only symmetric dyad features are used
+hist_gradient_boosting,order_1_2_3_4,ok,leave-one-dyad-out,6000,0.251,0.22900983155557264,0.22567791936295967,invariant by construction: only symmetric dyad features are used
+random_forest_shallow,order_1_2_3_4,ok,leave-one-dyad-out,6000,0.232,0.23914073976955527,0.22780560387166654,invariant by construction: only symmetric dyad features are used
+unigram_next_token,next_vocabulary_token,ok,leave-one-dyad-out,10695,0.1629733520336606,0.08887484755779632,0.04207705069379026,tokenization uses symmetric dyad features
+markov_next_token,next_vocabulary_token,ok,leave-one-dyad-out,10695,0.48489948574100045,0.3867100663566346,0.38401008931412023,tokenization uses symmetric dyad features

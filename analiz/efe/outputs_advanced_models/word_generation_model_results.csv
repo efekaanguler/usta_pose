@@ -1,0 +1,8 @@
+model,target,feature_set,validation,n_samples,n_classes,accuracy,balanced_accuracy,macro_f1,top3_accuracy,status
+logistic_l2_current,word,current_movement,leave-one-dyad-out,21478,12,0.932302821491759,0.9451988251345366,0.9098186916451526,0.9997672036502467,ok
+hist_gradient_boosting_current,word,current_movement,leave-one-dyad-out,21478,12,0.9839370518670267,0.9631589521018881,0.9624724538310545,0.9998137629201974,ok
+random_forest_shallow_current,word,current_movement,leave-one-dyad-out,21478,12,0.8886767855480026,0.8962063072380929,0.8449551756090333,0.9698295930719806,ok
+xgboost_hist,word,current_movement,leave-one-dyad-out,21478,12,0.9846820001862371,0.9640087847911327,0.9641814748395378,0.9998603221901481,ok
+logistic_l2_past3,word,past3_movement_plus_past_words,leave-one-dyad-out,21478,12,0.32652016016388863,0.2597945153724312,0.1754753780180763,0.5752863395101965,ok
+hist_gradient_boosting_past3,word,past3_movement_plus_past_words,leave-one-dyad-out,21478,12,0.5981469410559642,0.12322406414487967,0.1296768387516317,0.7910419964614955,ok
+xgboost_hist,word,past3_movement_numeric_only,leave-one-dyad-out,21478,12,0.6006611416332992,0.12051335521893984,0.12349585409669163,0.797699972064438,ok

@@ -1,0 +1,2 @@
+model,target,status,reason
+all,all,skipped,fewer than 3 dyads/windows

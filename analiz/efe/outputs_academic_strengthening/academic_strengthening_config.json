@@ -1,0 +1,11 @@
+{
+  "conversation_dir": "/home/efekaan/Desktop/romer/22kekec/usta_pose/analiz/efe/outputs_conversation_full",
+  "output_dir": "/home/efekaan/Desktop/romer/22kekec/usta_pose/analiz/efe/outputs_academic_strengthening",
+  "horizon_windows": 12,
+  "wait_words": [
+    "IW01",
+    "IW11"
+  ],
+  "dominant_immediate_response_word": "IW01",
+  "xgboost_available": true
+}

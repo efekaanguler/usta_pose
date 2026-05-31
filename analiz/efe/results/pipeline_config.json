@@ -1,0 +1,13 @@
+{
+  "input_dir": "/home/efekaan/Desktop/romer/22kekec/usta_pose/testing/final_dataset_parquets",
+  "output_dir": "/home/efekaan/Desktop/romer/22kekec/usta_pose/analiz/efe/results",
+  "window_sizes_s": [
+    1.0,
+    2.0,
+    5.0
+  ],
+  "stride_ratio": 1.0,
+  "max_model_windows": 8000,
+  "random_seed": 42,
+  "warnings": []
+}

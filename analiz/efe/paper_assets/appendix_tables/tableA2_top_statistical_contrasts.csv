@@ -1,0 +1,11 @@
+Contrast,Feature,Window size,Mean diff.,Effect size,Raw p,FDR q
+S1_vs_S2S3S4_mean,any_partner_gaze_count_session_mean,1s,2.608,1.092,0.0010,0.2592
+S1_vs_S2S3S4_mean,p2_gaze_category_away_unknown_ratio_session_mean,2s,-0.067,-0.974,0.0010,0.2592
+S1_vs_S2S3S4_mean,any_partner_gaze_count_session_mean,2s,5.214,1.098,0.0010,0.2592
+S1_vs_S2S3S4_mean,p1_task_gaze_transition_count_session_mean,1s,0.250,1.360,0.0020,0.2592
+S1_vs_S2S3S4_mean,p2_gaze_category_away_unknown_ratio_session_mean,1s,-0.067,-0.970,0.0020,0.2592
+S1_vs_S4,p1_task_gaze_transition_count_session_mean,2s,0.669,1.370,0.0020,0.2592
+S1_vs_S2S3S4_mean,p1_task_gaze_transition_count_session_mean,2s,0.524,1.366,0.0020,0.2592
+S1_vs_S2,frame_pose_valid_ratio_session_mean,5s,0.112,0.838,0.0020,0.2592
+S1_vs_S2,frame_interaction_valid_ratio_session_mean,5s,0.112,0.838,0.0020,0.2592
+S1_vs_S2S3S4_mean,any_partner_gaze_count_session_mean,5s,13.225,1.058,0.0020,0.2592

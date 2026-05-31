@@ -1,0 +1,35 @@
+{
+  "input_dir": "/home/efekaan/Desktop/romer/22kekec/usta_pose/testing/final_dataset_parquets",
+  "output_dir": "/home/efekaan/Desktop/romer/22kekec/usta_pose/analiz/efe/outputs_conversation_full",
+  "window_s": 1.0,
+  "stride_s": 0.5,
+  "min_valid_ratio": 0.5,
+  "word_k": 12,
+  "warnings": [],
+  "vocabulary_info": {
+    "status": "ok",
+    "n_person_windows": 21478,
+    "k": 12,
+    "features": [
+      "motion_energy_mean",
+      "motion_energy_max",
+      "motion_active_ratio",
+      "motion_burst_count",
+      "left_wrist_speed_mean",
+      "right_wrist_speed_mean",
+      "dominant_hand_speed_mean",
+      "left_hand_to_other_head_mean",
+      "right_hand_to_other_head_mean",
+      "closest_hand_to_other_head_mean",
+      "closest_hand_to_other_head_min",
+      "left_hand_reach_delta",
+      "right_hand_reach_delta",
+      "closest_hand_reach_delta",
+      "partner_gaze_ratio",
+      "task_gaze_ratio",
+      "gaze_switch_rate",
+      "root_distance_mean",
+      "partner_active_ratio"
+    ]
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "input_path": "/home/efekaan/Desktop/romer/22kekec/usta_pose/analiz/efe/outputs_conversation_full/individual_words.parquet",
+  "output_dir": "/home/efekaan/Desktop/romer/22kekec/usta_pose/analiz/efe/outputs_cv_vocab_validation",
+  "k": 12,
+  "features": [
+    "motion_energy_mean",
+    "motion_energy_max",
+    "motion_active_ratio",
+    "motion_burst_count",
+    "left_wrist_speed_mean",
+    "right_wrist_speed_mean",
+    "dominant_hand_speed_mean",
+    "left_hand_to_other_head_mean",
+    "right_hand_to_other_head_mean",
+    "closest_hand_to_other_head_mean",
+    "closest_hand_to_other_head_min",
+    "left_hand_reach_delta",
+    "right_hand_reach_delta",
+    "closest_hand_reach_delta",
+    "partner_gaze_ratio",
+    "task_gaze_ratio",
+    "gaze_switch_rate",
+    "root_distance_mean",
+    "partner_active_ratio"
+  ],
+  "xgboost_available": true,
+  "interpretation": "Clusters are learned only on train dyads in each fold; held-out dyads are assigned to train centroids."
+}

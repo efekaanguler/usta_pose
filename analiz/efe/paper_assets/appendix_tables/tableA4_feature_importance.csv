@@ -1,0 +1,16 @@
+Rank,Feature,Importance mean,Importance std.,Window,Model
+1,p1_gaze_pitch_max,0.0103,0.0016,5s,Random Forest
+2,frame_gaze_valid_transition_count,0.0102,0.0018,5s,Random Forest
+3,frame_pose_valid_ratio,0.0094,0.0031,5s,Random Forest
+4,frame_gaze_valid_count,0.0093,0.0030,5s,Random Forest
+5,p1_task_gaze_count,0.0079,0.0014,5s,Random Forest
+6,p2_gaze_yaw_min,0.0078,0.0034,5s,Random Forest
+7,root_distance_max,0.0077,0.0031,5s,Random Forest
+8,p1_task_gaze_angle_max,0.0076,0.0023,5s,Random Forest
+9,frame_interaction_valid_count,0.0075,0.0028,5s,Random Forest
+10,frame_pose_valid_count,0.0074,0.0025,5s,Random Forest
+11,p2_gaze_pitch_max,0.0074,0.0020,5s,Random Forest
+12,hand_to_hand_min_min,0.0056,0.0028,5s,Random Forest
+13,frame_interaction_valid_ratio,0.0056,0.0030,5s,Random Forest
+14,p2_motion_speed_std,0.0050,0.0017,5s,Random Forest
+15,p1_gaze_pitch_min,0.0048,0.0008,5s,Random Forest

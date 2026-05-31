@@ -1,0 +1,13 @@
+session_label,dyad_id,order,from_actor_slot,to_actor_slot,actor_word,other_word_same_window,response_word,prev_actor_word,window_index,response_window_index
+20260507_155542_order1,dyad_001,1,person_B,person_A,IW06,IW05,IW05,IW06,4,5
+20260507_155542_order1,dyad_001,1,person_A,person_B,IW03,IW06,IW06,IW03,12,13
+20260507_155542_order1,dyad_001,1,person_B,person_A,IW05,IW05,IW05,IW05,16,17
+20260507_155542_order1,dyad_001,1,person_A,person_B,IW05,IW03,IW03,IW05,17,18
+20260507_155542_order1,dyad_001,1,person_B,person_A,IW02,IW11,IW06,IW02,20,21
+20260507_155542_order1,dyad_001,1,person_A,person_B,IW06,IW06,IW05,IW06,22,23
+20260507_155542_order1,dyad_001,1,person_B,person_A,IW05,IW03,IW11,IW06,23,24
+20260507_155542_order1,dyad_001,1,person_A,person_B,IW00,IW05,IW11,IW03,39,40
+20260507_155542_order1,dyad_001,1,person_B,person_A,IW11,IW05,IW00,IW00,40,41
+20260507_155542_order1,dyad_001,1,person_B,person_A,IW00,IW00,IW00,IW10,51,52
+20260507_155542_order1,dyad_001,1,person_A,person_B,IW02,IW00,IW10,IW00,53,54
+20260507_155542_order1,dyad_001,1,person_B,person_A,IW10,IW00,IW00,IW10,56,57

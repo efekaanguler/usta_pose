@@ -1,0 +1,4 @@
+model,target,status,validation,n_samples,accuracy,balanced_accuracy,macro_f1,role_handling
+unigram_response,response_word,ok,leave-one-dyad-out,1964,0.5432790224032586,0.08333333333333333,0.05867150555372264,anonymous actor/responder; no p1/p2 semantic feature
+actor_word_markov_response,response_word,ok,leave-one-dyad-out,1964,0.5432790224032586,0.08333333333333333,0.05867150555372264,anonymous actor/responder; no p1/p2 semantic feature
+logistic_context_response,response_word,ok,leave-one-dyad-out,1964,0.18228105906313646,0.12219491634120945,0.09592175341315724,anonymous actor/responder; no p1/p2 semantic feature

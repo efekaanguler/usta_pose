@@ -1,0 +1,2 @@
+model,target,status,reason
+all,response_word,skipped,not enough response pairs/dyads

@@ -1,0 +1,13 @@
+word,description,prevalence,is_wait_or_monitoring_word,reason
+IW00,moderate body motion; brief/intermittent active; balanced hands; right hand moves toward partner; task-directed gaze; partner mostly passive,0.03021696619797,False,active/non-default candidate
+IW01,moderate body motion; brief/intermittent active; balanced hands; partner-directed gaze; partner mostly passive,0.597914144706211,True,dominant response
+IW02,high body motion; brief/intermittent active; balanced hands; left hand withdraws; task-directed gaze; partner mostly passive,0.0406462426669149,False,active/non-default candidate
+IW03,high body motion; brief/intermittent active; right-hand dominant; right hand moves toward partner; partner-directed gaze; partner mostly passive,0.0086134649408697,False,active/non-default candidate
+IW04,high body motion; brief/intermittent active; balanced hands; right hand moves toward partner; task-directed gaze; partner mostly passive,0.0312412701368842,False,active/non-default candidate
+IW05,high body motion; brief/intermittent active; left-hand dominant; partner-directed gaze; partner mostly passive,0.0161095074029239,False,active/non-default candidate
+IW06,moderate body motion; brief/intermittent active; balanced hands; left hand withdraws; task-directed gaze; partner mostly passive,0.0667194338392774,False,active/non-default candidate
+IW07,moderate body motion; brief/intermittent active; balanced hands; right hand moves toward partner; task-directed gaze; partner mostly passive,0.0538225160629481,False,active/non-default candidate
+IW08,high body motion; brief/intermittent active; left-hand dominant; left hand moves toward partner; partner-directed gaze; partner mostly passive,0.0471645404600055,False,active/non-default candidate
+IW09,high body motion; brief/intermittent active; right-hand dominant; left hand withdraws; partner-directed gaze; partner mostly passive,0.0101033615792904,False,active/non-default candidate
+IW10,moderate body motion; brief/intermittent active; balanced hands; right hand moves toward partner; partner-directed gaze; partner mostly passive,0.0334295558245646,False,active/non-default candidate
+IW11,moderate body motion; brief/intermittent active; balanced hands; partner-directed gaze; partner mostly passive,0.0640189961821398,True,partner-gaze monitoring without explicit hand event

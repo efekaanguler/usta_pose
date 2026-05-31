@@ -1,0 +1,309 @@
+pair_id,session_label,order,condition_label,camera_id,n_features,missing_ratio,note,camera_value,count
+dyad_001,20260504_183351_order1,1,baseline,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_001,20260504_183351_order1,1,baseline,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_001,20260504_183351_order1,1,baseline,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_001,20260504_183351_order1,1,baseline,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_001,20260504_183351_order1,1,baseline,fused_or_unknown,3304,0.12843210193839869,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_001,20260504_183351_order1,1,baseline,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,1790.0
+dyad_001,20260504_183351_order1,1,baseline,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,1790.0
+dyad_001,20260504_183529_order2,2,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_001,20260504_183529_order2,2,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_001,20260504_183529_order2,2,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_001,20260504_183529_order2,2,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_001,20260504_183529_order2,2,competitive,fused_or_unknown,3304,0.11774637042057798,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_001,20260504_183529_order2,2,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,7116.0
+dyad_001,20260504_183529_order2,2,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,7116.0
+dyad_001,20260504_184034_order3,3,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_001,20260504_184034_order3,3,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_001,20260504_184034_order3,3,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_001,20260504_184034_order3,3,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_001,20260504_184034_order3,3,competitive,fused_or_unknown,3304,0.13574157202067777,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_001,20260504_184034_order3,3,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,2793.0
+dyad_001,20260504_184034_order3,3,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,2793.0
+dyad_001,20260504_184304_order4,4,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_001,20260504_184304_order4,4,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_001,20260504_184304_order4,4,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_001,20260504_184304_order4,4,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_001,20260504_184304_order4,4,competitive,fused_or_unknown,3304,0.12858526968432502,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_001,20260504_184304_order4,4,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,5458.0
+dyad_001,20260504_184304_order4,4,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,5458.0
+dyad_002,20260505_190850_order1,1,baseline,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_002,20260505_190850_order1,1,baseline,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_002,20260505_190850_order1,1,baseline,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_002,20260505_190850_order1,1,baseline,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_002,20260505_190850_order1,1,baseline,fused_or_unknown,3304,0.21268988384063195,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_002,20260505_190850_order1,1,baseline,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,5271.0
+dyad_002,20260505_190850_order1,1,baseline,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,5271.0
+dyad_002,20260505_191548_order2,2,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_002,20260505_191548_order2,2,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_002,20260505_191548_order2,2,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_002,20260505_191548_order2,2,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_002,20260505_191548_order2,2,competitive,fused_or_unknown,3304,0.17482674228582898,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_002,20260505_191548_order2,2,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,1858.0
+dyad_002,20260505_191548_order2,2,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,1858.0
+dyad_002,20260505_191759_order3,3,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_002,20260505_191759_order3,3,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_002,20260505_191759_order3,3,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_002,20260505_191759_order3,3,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_002,20260505_191759_order3,3,competitive,fused_or_unknown,3304,0.18496900818515555,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_002,20260505_191759_order3,3,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,1577.0
+dyad_002,20260505_191759_order3,3,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,1577.0
+dyad_002,20260505_192656_order4,4,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_002,20260505_192656_order4,4,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_002,20260505_192656_order4,4,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_002,20260505_192656_order4,4,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_002,20260505_192656_order4,4,competitive,fused_or_unknown,3304,0.22058161984006389,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_002,20260505_192656_order4,4,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,6938.0
+dyad_002,20260505_192656_order4,4,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,6938.0
+dyad_003,20260507_134304_order1,1,baseline,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_003,20260507_134304_order1,1,baseline,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_003,20260507_134304_order1,1,baseline,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_003,20260507_134304_order1,1,baseline,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_003,20260507_134304_order1,1,baseline,fused_or_unknown,3304,0.29967747786989385,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_003,20260507_134304_order1,1,baseline,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,8416.0
+dyad_003,20260507_134304_order1,1,baseline,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,8416.0
+dyad_003,20260507_135022_order2,2,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_003,20260507_135022_order2,2,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_003,20260507_135022_order2,2,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_003,20260507_135022_order2,2,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_003,20260507_135022_order2,2,competitive,fused_or_unknown,3304,0.27490321421919484,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_003,20260507_135022_order2,2,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,1820.0
+dyad_003,20260507_135022_order2,2,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,1820.0
+dyad_003,20260507_135244_order3,3,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_003,20260507_135244_order3,3,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_003,20260507_135244_order3,3,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_003,20260507_135244_order3,3,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_003,20260507_135244_order3,3,competitive,fused_or_unknown,3304,0.18185013008736703,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_003,20260507_135244_order3,3,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,993.0
+dyad_003,20260507_135244_order3,3,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,993.0
+dyad_003,20260507_135359_order4,4,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_003,20260507_135359_order4,4,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_003,20260507_135359_order4,4,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_003,20260507_135359_order4,4,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_003,20260507_135359_order4,4,competitive,fused_or_unknown,3304,0.20865108663422938,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_003,20260507_135359_order4,4,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,2213.0
+dyad_003,20260507_135359_order4,4,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,2213.0
+dyad_004,20260507_141202_order1,1,baseline,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_004,20260507_141202_order1,1,baseline,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_004,20260507_141202_order1,1,baseline,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_004,20260507_141202_order1,1,baseline,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_004,20260507_141202_order1,1,baseline,fused_or_unknown,3304,0.36387534373766706,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_004,20260507_141202_order1,1,baseline,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,9933.0
+dyad_004,20260507_141202_order1,1,baseline,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,9933.0
+dyad_004,20260507_142235_order2,2,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_004,20260507_142235_order2,2,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_004,20260507_142235_order2,2,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_004,20260507_142235_order2,2,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_004,20260507_142235_order2,2,competitive,fused_or_unknown,3304,0.3266777431971401,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_004,20260507_142235_order2,2,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,8929.0
+dyad_004,20260507_142235_order2,2,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,8929.0
+dyad_004,20260507_143033_order3,3,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_004,20260507_143033_order3,3,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_004,20260507_143033_order3,3,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_004,20260507_143033_order3,3,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_004,20260507_143033_order3,3,competitive,fused_or_unknown,3304,0.15494386127773613,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_004,20260507_143033_order3,3,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,4841.0
+dyad_004,20260507_143033_order3,3,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,4841.0
+dyad_004,20260507_143442_order4,4,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_004,20260507_143442_order4,4,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_004,20260507_143442_order4,4,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_004,20260507_143442_order4,4,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_004,20260507_143442_order4,4,competitive,fused_or_unknown,3304,0.10004158332456048,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_004,20260507_143442_order4,4,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,1150.0
+dyad_004,20260507_143442_order4,4,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,1150.0
+dyad_005,20260507_151153_order1,1,baseline,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_005,20260507_151153_order1,1,baseline,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_005,20260507_151153_order1,1,baseline,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_005,20260507_151153_order1,1,baseline,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_005,20260507_151153_order1,1,baseline,fused_or_unknown,3304,0.12063710248037962,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_005,20260507_151153_order1,1,baseline,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,1865.0
+dyad_005,20260507_151153_order1,1,baseline,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,1865.0
+dyad_005,20260507_151733_order2,2,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_005,20260507_151733_order2,2,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_005,20260507_151733_order2,2,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_005,20260507_151733_order2,2,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_005,20260507_151733_order2,2,competitive,fused_or_unknown,3304,0.0996472386098688,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_005,20260507_151733_order2,2,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,3237.0
+dyad_005,20260507_151733_order2,2,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,3237.0
+dyad_005,20260507_152058_order3,3,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_005,20260507_152058_order3,3,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_005,20260507_152058_order3,3,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_005,20260507_152058_order3,3,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_005,20260507_152058_order3,3,competitive,fused_or_unknown,3304,0.123358070100857,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_005,20260507_152058_order3,3,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,1965.0
+dyad_005,20260507_152058_order3,3,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,1965.0
+dyad_005,20260507_152317_order4,4,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_005,20260507_152317_order4,4,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_005,20260507_152317_order4,4,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_005,20260507_152317_order4,4,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_005,20260507_152317_order4,4,competitive,fused_or_unknown,3304,0.17101010539303715,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_005,20260507_152317_order4,4,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,2818.0
+dyad_005,20260507_152317_order4,4,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,2818.0
+dyad_006,20260507_154437_order1,1,baseline,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_006,20260507_154437_order1,1,baseline,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_006,20260507_154437_order1,1,baseline,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_006,20260507_154437_order1,1,baseline,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_006,20260507_154437_order1,1,baseline,fused_or_unknown,3304,0.1019741243155401,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_006,20260507_154437_order1,1,baseline,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,1484.0
+dyad_006,20260507_154437_order1,1,baseline,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,1484.0
+dyad_006,20260507_154803_order2,2,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_006,20260507_154803_order2,2,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_006,20260507_154803_order2,2,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_006,20260507_154803_order2,2,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_006,20260507_154803_order2,2,competitive,fused_or_unknown,3304,0.09402003441876304,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_006,20260507_154803_order2,2,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,6783.0
+dyad_006,20260507_154803_order2,2,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,6783.0
+dyad_006,20260507_155406_order3,3,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_006,20260507_155406_order3,3,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_006,20260507_155406_order3,3,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_006,20260507_155406_order3,3,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_006,20260507_155406_order3,3,competitive,fused_or_unknown,3304,0.06984363901260428,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_006,20260507_155406_order3,3,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,1868.0
+dyad_006,20260507_155406_order3,3,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,1868.0
+dyad_006,20260507_155542_order4,4,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_006,20260507_155542_order4,4,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_006,20260507_155542_order4,4,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_006,20260507_155542_order4,4,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_006,20260507_155542_order4,4,competitive,fused_or_unknown,3304,0.13654995420373445,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_006,20260507_155542_order4,4,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,801.0
+dyad_006,20260507_155542_order4,4,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,801.0
+dyad_007,20260510_112436_order1,1,baseline,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_007,20260510_112436_order1,1,baseline,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_007,20260510_112436_order1,1,baseline,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_007,20260510_112436_order1,1,baseline,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_007,20260510_112436_order1,1,baseline,fused_or_unknown,3304,0.13241719056833998,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_007,20260510_112436_order1,1,baseline,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,2032.0
+dyad_007,20260510_112436_order1,1,baseline,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,2032.0
+dyad_007,20260510_112937_order2,2,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_007,20260510_112937_order2,2,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_007,20260510_112937_order2,2,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_007,20260510_112937_order2,2,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_007,20260510_112937_order2,2,competitive,fused_or_unknown,3304,0.10890634712942475,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_007,20260510_112937_order2,2,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,5570.0
+dyad_007,20260510_112937_order2,2,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,5570.0
+dyad_007,20260510_113403_order3,3,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_007,20260510_113403_order3,3,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_007,20260510_113403_order3,3,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_007,20260510_113403_order3,3,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_007,20260510_113403_order3,3,competitive,fused_or_unknown,3304,0.11472201245548283,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_007,20260510_113403_order3,3,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,3636.0
+dyad_007,20260510_113403_order3,3,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,3636.0
+dyad_007,20260510_113658_order4,4,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_007,20260510_113658_order4,4,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_007,20260510_113658_order4,4,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_007,20260510_113658_order4,4,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_007,20260510_113658_order4,4,competitive,fused_or_unknown,3304,0.11590905355332269,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_007,20260510_113658_order4,4,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,18856.0
+dyad_007,20260510_113658_order4,4,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,18856.0
+dyad_008,20260510_121708_order1,1,baseline,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_008,20260510_121708_order1,1,baseline,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_008,20260510_121708_order1,1,baseline,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_008,20260510_121708_order1,1,baseline,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_008,20260510_121708_order1,1,baseline,fused_or_unknown,3304,0.40465861349587084,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_008,20260510_121708_order1,1,baseline,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,1763.0
+dyad_008,20260510_121708_order1,1,baseline,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,1763.0
+dyad_008,20260510_122126_order2,2,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_008,20260510_122126_order2,2,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_008,20260510_122126_order2,2,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_008,20260510_122126_order2,2,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_008,20260510_122126_order2,2,competitive,fused_or_unknown,3304,0.2304199989843426,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_008,20260510_122126_order2,2,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,4911.0
+dyad_008,20260510_122126_order2,2,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,4911.0
+dyad_008,20260510_122534_order3,3,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_008,20260510_122534_order3,3,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_008,20260510_122534_order3,3,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_008,20260510_122534_order3,3,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_008,20260510_122534_order3,3,competitive,fused_or_unknown,3304,0.28035445350602234,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_008,20260510_122534_order3,3,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,4074.0
+dyad_008,20260510_122534_order3,3,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,4074.0
+dyad_008,20260510_122925_order4,4,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_008,20260510_122925_order4,4,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_008,20260510_122925_order4,4,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_008,20260510_122925_order4,4,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_008,20260510_122925_order4,4,competitive,fused_or_unknown,3304,0.21807418115092453,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_008,20260510_122925_order4,4,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,8453.0
+dyad_008,20260510_122925_order4,4,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,8453.0
+dyad_009,20260510_140907_order1,1,baseline,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_009,20260510_140907_order1,1,baseline,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_009,20260510_140907_order1,1,baseline,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_009,20260510_140907_order1,1,baseline,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_009,20260510_140907_order1,1,baseline,fused_or_unknown,3304,0.4039807592861903,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_009,20260510_140907_order1,1,baseline,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,12970.0
+dyad_009,20260510_140907_order1,1,baseline,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,12970.0
+dyad_009,20260510_141947_order2,2,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_009,20260510_141947_order2,2,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_009,20260510_141947_order2,2,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_009,20260510_141947_order2,2,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_009,20260510_141947_order2,2,competitive,fused_or_unknown,3304,0.35609183554106505,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_009,20260510_141947_order2,2,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,2753.0
+dyad_009,20260510_141947_order2,2,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,2753.0
+dyad_009,20260510_142206_order3,3,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_009,20260510_142206_order3,3,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_009,20260510_142206_order3,3,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_009,20260510_142206_order3,3,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_009,20260510_142206_order3,3,competitive,fused_or_unknown,3304,0.4740851317295454,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_009,20260510_142206_order3,3,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,1813.0
+dyad_009,20260510_142206_order3,3,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,1813.0
+dyad_009,20260510_142353_order4,4,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_009,20260510_142353_order4,4,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_009,20260510_142353_order4,4,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_009,20260510_142353_order4,4,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_009,20260510_142353_order4,4,competitive,fused_or_unknown,3304,0.426660512570828,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_009,20260510_142353_order4,4,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,1661.0
+dyad_009,20260510_142353_order4,4,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,1661.0
+dyad_010,20260510_144735_order1,1,baseline,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_010,20260510_144735_order1,1,baseline,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_010,20260510_144735_order1,1,baseline,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_010,20260510_144735_order1,1,baseline,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_010,20260510_144735_order1,1,baseline,fused_or_unknown,3304,0.2268072136128535,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_010,20260510_144735_order1,1,baseline,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,1954.0
+dyad_010,20260510_144735_order1,1,baseline,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,1954.0
+dyad_010,20260510_145002_order2,2,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_010,20260510_145002_order2,2,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_010,20260510_145002_order2,2,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_010,20260510_145002_order2,2,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_010,20260510_145002_order2,2,competitive,fused_or_unknown,3304,0.21762402698433717,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_010,20260510_145002_order2,2,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,2048.0
+dyad_010,20260510_145002_order2,2,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,2048.0
+dyad_010,20260510_145207_order3,3,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_010,20260510_145207_order3,3,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_010,20260510_145207_order3,3,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_010,20260510_145207_order3,3,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_010,20260510_145207_order3,3,competitive,fused_or_unknown,3304,0.2390479110681407,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_010,20260510_145207_order3,3,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,2294.0
+dyad_010,20260510_145207_order3,3,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,2294.0
+dyad_010,20260510_145409_order4,4,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_010,20260510_145409_order4,4,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_010,20260510_145409_order4,4,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_010,20260510_145409_order4,4,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_010,20260510_145409_order4,4,competitive,fused_or_unknown,3304,0.16250108069501493,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_010,20260510_145409_order4,4,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,4397.0
+dyad_010,20260510_145409_order4,4,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,4397.0
+dyad_011,20260510_154339_order1,1,baseline,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_011,20260510_154339_order1,1,baseline,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_011,20260510_154339_order1,1,baseline,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_011,20260510_154339_order1,1,baseline,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_011,20260510_154339_order1,1,baseline,fused_or_unknown,3304,0.30371595082959757,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_011,20260510_154339_order1,1,baseline,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,4867.0
+dyad_011,20260510_154339_order1,1,baseline,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,4867.0
+dyad_011,20260510_154923_order2,2,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_011,20260510_154923_order2,2,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_011,20260510_154923_order2,2,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_011,20260510_154923_order2,2,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_011,20260510_154923_order2,2,competitive,fused_or_unknown,3304,0.12660344029944906,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_011,20260510_154923_order2,2,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,2418.0
+dyad_011,20260510_154923_order2,2,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,2418.0
+dyad_011,20260510_155222_order3,3,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_011,20260510_155222_order3,3,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_011,20260510_155222_order3,3,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_011,20260510_155222_order3,3,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_011,20260510_155222_order3,3,competitive,fused_or_unknown,3304,0.12806954184874705,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_011,20260510_155222_order3,3,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,3012.0
+dyad_011,20260510_155222_order3,3,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,3012.0
+dyad_011,20260510_155501_order4,4,competitive,cam1,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_011,20260510_155501_order4,4,competitive,cam2,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_011,20260510_155501_order4,4,competitive,cam3,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_011,20260510_155501_order4,4,competitive,cam4,33,0.0,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_011,20260510_155501_order4,4,competitive,fused_or_unknown,3304,0.19963434346974984,Final parquet is a fused interaction table; per-camera raw streams are not preserved except calibration/gaze camera id fields.,,
+dyad_011,20260510_155501_order4,4,competitive,p1_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,4.0,1796.0
+dyad_011,20260510_155501_order4,4,competitive,p2_gaze_cam_id,1,0.0,Gaze camera-id distribution from fused table.,3.0,1796.0

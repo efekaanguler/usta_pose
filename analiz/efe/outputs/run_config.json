@@ -1,0 +1,38 @@
+{
+  "input_dir": "/home/efekaan/Desktop/romer/22kekec/final_dataset_parquets",
+  "output_dir": "/home/efekaan/Desktop/romer/22kekec/usta_pose/analiz/efe/outputs",
+  "window_s": 1.0,
+  "stride_s": 0.5,
+  "min_window_valid_ratio": 0.5,
+  "max_lag_s": 2.0,
+  "random_seed": 42,
+  "vocabulary_k": 8,
+  "warnings": [
+    "Input directory has only 1 parquet file(s); dyad-level order statistics and group-validated models will be limited or skipped.",
+    "Incomplete or ambiguous dyad blocks detected: dyad_001"
+  ],
+  "vocabulary_info": {
+    "status": "ok",
+    "n_windows": 60,
+    "n_features": 15,
+    "k": 3,
+    "silhouette": 0.14925481916978445,
+    "features": [
+      "pair_motion_energy_mean",
+      "motion_energy_absdiff_mean",
+      "both_active_ratio",
+      "one_active_ratio",
+      "activity_state_entropy",
+      "root_distance_mean",
+      "root_distance_delta",
+      "motion_crosscorr_absmax",
+      "motion_crosscorr_abs_lag_s",
+      "closest_hand_to_other_head_mean",
+      "hand_to_hand_min_mean",
+      "partner_gaze_ratio_mean",
+      "partner_gaze_ratio_both",
+      "task_gaze_ratio_mean",
+      "mutual_gaze_ratio"
+    ]
+  }
+}

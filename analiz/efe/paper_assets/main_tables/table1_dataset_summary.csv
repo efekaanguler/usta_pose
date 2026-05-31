@@ -1,0 +1,14 @@
+Dataset property,Value
+Participants,22
+Dyads,11
+Sessions per dyad,4
+Total sessions,44
+Total processed frame rows,"183,195"
+Cameras,4 total; D455 for pose and D435 for gaze per participant
+Resolution/FPS,"720p, 30 fps"
+Task objects,"18 disks, 9 colors, 2 copies per color"
+Session 1,Noncompetitive first exposure
+Sessions 2-4,Competitive/practiced scoring
+Session lengths,Variable; stopped after task completion
+Processed table format,Synchronized fused parquet
+Approximate columns per parquet,"3,436"

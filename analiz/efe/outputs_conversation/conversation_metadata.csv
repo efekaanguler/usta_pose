@@ -1,0 +1,2 @@
+file_name,session_label,recording_date,recording_time,recording_datetime_key,order,is_competitive_practiced,parse_ok,path,row_count,column_count,has_interaction_schema,schema_matches_first,dyad_id,dyad_block_index,dyad_block_valid,dyad_block_note
+20260507_155542_order1.parquet,20260507_155542_order1,20260507,155542,20260507_155542,1,False,True,/home/efekaan/Desktop/romer/22kekec/final_dataset_parquets/20260507_155542_order1.parquet,801,3436,True,True,dyad_001,1,False,incomplete/ambiguous block; orders=[1]
