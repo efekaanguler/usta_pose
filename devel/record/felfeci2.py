@@ -40,12 +40,19 @@ import imageio
 import numpy as np
 import pyrealsense2 as rs
 import os
+import sys
 import json
 import time
 import threading
 import queue
 from datetime import datetime
 from pathlib import Path
+
+# Add parent directory (devel/) to sys.path so 'import utils' works from anywhere
+script_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(script_dir)
+if parent_dir not in sys.path:
+    sys.path.append(parent_dir)
 
 
 class CameraThread:
