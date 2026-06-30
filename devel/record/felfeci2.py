@@ -361,6 +361,7 @@ class CameraThread:
                 mode='I',
                 fps=self.fps,
                 codec='ffv1',
+                pixelformat='gray16le',  # Ensure 16-bit input pipe to prevent 8-bit quantization
                 output_params=[
                     '-pix_fmt', 'gray16le',  # 16-bit little-endian grayscale
                 ],
