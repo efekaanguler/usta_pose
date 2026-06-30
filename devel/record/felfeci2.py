@@ -328,10 +328,11 @@ class CameraThread:
                 self.video_writer.write(color_image)
 
             if depth_image is not None and self._depth_writer is not None:
-                # Store raw uint16 z16 values via FFV1 lossless codec.
-                # imageio expects (H, W) uint16 for gray16le pixel format.
+                # Store raw uint16 z16 values via FFV1 lossless codec directly using imageio_ffmpeg.
                 depth_z16 = depth_image.astype(np.uint16)
-                self._depth_writer.append_data(depth_z16)
+                if not depth_z16.flags.c_contiguous:
+                    depth_z16 = np.ascontiguousarray(depth_z16)
+                self._depth_writer.send(depth_z16.tobytes())
 
     def prepare_recording(self, session_dir):
         """Set up writers and directories, but don't start recording yet.
@@ -352,21 +353,20 @@ class CameraThread:
         self.video_writer = cv2.VideoWriter(video_path, fourcc, self.fps,
                                             (self.width, self.height))
 
-        # Depth video writer — FFV1 lossless in MKV container (16-bit grayscale)
+        # Depth video writer — FFV1 lossless in MKV container (true 16-bit grayscale via imageio_ffmpeg)
         if self.enable_depth:
+            import imageio_ffmpeg as iio_ff
             depth_mkv_path = os.path.join(self.cam_dir, "depth.mkv")
-            self._depth_writer = imageio.get_writer(
+            self._depth_writer = iio_ff.write_frames(
                 depth_mkv_path,
-                format='FFMPEG',
-                mode='I',
-                fps=self.fps,
+                (self.width, self.height),
+                pix_fmt_in='gray16le',
+                pix_fmt_out='gray16le',
                 codec='ffv1',
-                pixelformat='gray16le',  # Ensure 16-bit input pipe to prevent 8-bit quantization
-                output_params=[
-                    '-pix_fmt', 'gray16le',  # 16-bit little-endian grayscale
-                ],
-                macro_block_size=1,  # no macro-block alignment padding
+                fps=self.fps,
+                macro_block_size=1,
             )
+            self._depth_writer.send(None)  # initialize generator
 
             # Save depth metadata as a small sidecar JSON (replaces h5 attrs)
             depth_meta = {
@@ -387,8 +387,7 @@ class CameraThread:
                 'lossless': True,
                 'note': (
                     'depth_meters = frame.astype(float32) * depth_scale; '
-                    'read with: frames = imageio.mimread("depth.mkv") or '
-                    'iio.imread("depth.mkv", index=None)'
+                    'read with: imageio_ffmpeg.read_frames("depth.mkv", pix_fmt="gray16le", bits_per_pixel=16)'
                 ),
             }
             depth_meta_path = os.path.join(self.cam_dir, "depth_meta.json")
@@ -763,8 +762,7 @@ def main(args):
                     'depth_scale_meters_per_unit': cam.depth_scale,
                     'note': (
                         'depth_meters = frame.astype(float32) * depth_scale; '
-                        'read with: frames = imageio.mimread("depth.mkv") or '
-                        'iio.imread("depth.mkv", index=None); '
+                        'read with: imageio_ffmpeg.read_frames("depth.mkv", pix_fmt="gray16le", bits_per_pixel=16); '
                         'if alignment_mode=none_raw_depth run devel/align_depth_postprocess.py '
                         'to generate aligned depth'
                     ),
