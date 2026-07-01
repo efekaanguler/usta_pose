@@ -4,7 +4,7 @@ Daily extrinsic-only ChArUco capture for the 4-camera RealSense rig.
 
 This script records synchronized two-camera image sets under:
 
-    ../record/recordings/calib_data/extrinsic/run_YYYYMMDD_HHMMSS/
+    ../record/recordings/calib_data/extrinsic/current/
 
 It deliberately does not calculate intrinsics. Fixed lens parameters must come
 from master_intrinsics.npz, created once by record_intrinsic.py.
@@ -12,6 +12,7 @@ from master_intrinsics.npz, created once by record_intrinsic.py.
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 from datetime import datetime
@@ -111,8 +112,9 @@ def main():
     args = parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_dir = args.output_dir / f"run_{timestamp}"
+    run_dir = args.output_dir / "current"
+    if run_dir.exists():
+        shutil.rmtree(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
 
     session_dirs = []
