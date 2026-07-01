@@ -68,6 +68,77 @@ def load_calibration(calib_path, cam_num):
     return np.eye(3), np.zeros(3)
 
 
+def load_npz_dict(path):
+    with np.load(path) as data:
+        return {key: np.array(data[key]) for key in data.files}
+
+
+def default_recordings_dir():
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    devel_dir = os.path.dirname(script_dir)
+    return os.path.join(devel_dir, "record", "recordings")
+
+
+def find_multicam_calibration(session_dir, explicit_path=None):
+    parent_dir = os.path.dirname(session_dir)
+    candidates = []
+    if explicit_path:
+        candidates.append(explicit_path)
+    candidates.extend([
+        os.path.join(session_dir, "multicam_calibration.npz"),
+        os.path.join(session_dir, "calib_data", "multicam_calibration.npz"),
+        os.path.join(parent_dir, "multicam_calibration.npz"),
+        os.path.join(parent_dir, "calib_data", "multicam_calibration.npz"),
+        os.path.join(default_recordings_dir(), "multicam_calibration.npz"),
+    ])
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
+    return None
+
+
+def find_intrinsics_npz(session_dir, preferred_calib=None):
+    parent_dir = os.path.dirname(session_dir)
+    recordings_dir = default_recordings_dir()
+    candidates = [
+        preferred_calib,
+        os.path.join(session_dir, "multicam_calibration.npz"),
+        os.path.join(session_dir, "calib_data", "multicam_calibration.npz"),
+        os.path.join(session_dir, "calib_data", "master_intrinsics.npz"),
+        os.path.join(parent_dir, "multicam_calibration.npz"),
+        os.path.join(parent_dir, "calib_data", "master_intrinsics.npz"),
+        os.path.join(recordings_dir, "multicam_calibration.npz"),
+        os.path.join(recordings_dir, "calib_data", "master_intrinsics.npz"),
+    ]
+
+    seen = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen or not os.path.exists(candidate):
+            continue
+        seen.add(candidate)
+        try:
+            with np.load(candidate) as data:
+                if "K1" in data:
+                    return candidate
+        except Exception:
+            continue
+    return None
+
+
+def intrinsics_from_npz(intrinsics_data, cam_id):
+    if intrinsics_data is None:
+        return None
+    K = intrinsics_data.get(f"K{cam_id}")
+    if K is None:
+        return None
+    return {
+        "fx": float(K[0, 0]),
+        "fy": float(K[1, 1]),
+        "ppx": float(K[0, 2]),
+        "ppy": float(K[1, 2]),
+    }
+
+
 def deproject_pixel_to_3d(x, y, depth_image, K, depth_scale, patch_radius=2):
     """Deproject 2D pixel + depth → 3D point in camera frame.
 
@@ -126,29 +197,57 @@ class VideoFrameReader:
 
 
 class DepthFrameReader:
-    """Sequential reader for depth.mkv via PyAV (16-bit gray)."""
+    """Sequential reader for depth.mkv via PyAV or imageio_ffmpeg (16-bit gray)."""
 
     def __init__(self, path):
-        import av
-        self.container = av.open(path)
-        self.stream = self.container.streams.video[0]
+        self.path = path
         self._frames = {}
-        self._iter = self.container.decode(self.stream)
         self._next_idx = 0
+        self._backend = 'none'
+        try:
+            import av
+            self.container = av.open(path)
+            self.stream = self.container.streams.video[0]
+            self._iter = self.container.decode(self.stream)
+            self._backend = 'av'
+        except Exception:
+            try:
+                import imageio_ffmpeg as iio_ff
+                self._rgen = iio_ff.read_frames(path, pix_fmt='gray16le', bits_per_pixel=16)
+                self._meta = next(self._rgen)
+                self._w, self._h = self._meta['size']
+                self._backend = 'iio_ff'
+            except Exception:
+                self.cap = cv2.VideoCapture(path, cv2.CAP_ANY)
+                self.cap.set(cv2.CAP_PROP_CONVERT_RGB, 0)
+                self._backend = 'cv2'
 
     def read_frame(self, idx):
         """Read frame at index idx. Supports forward seeking only."""
         if idx in self._frames:
             return self._frames[idx]
 
-        while self._next_idx <= idx:
-            try:
-                frame_av = next(self._iter)
-                arr = frame_av.to_ndarray()
-                self._frames[self._next_idx] = arr
-                self._next_idx += 1
-            except StopIteration:
-                return None
+        if self._backend == 'av':
+            while self._next_idx <= idx:
+                try:
+                    frame_av = next(self._iter)
+                    self._frames[self._next_idx] = frame_av.to_ndarray()
+                    self._next_idx += 1
+                except StopIteration:
+                    return None
+        elif self._backend == 'iio_ff':
+            while self._next_idx <= idx:
+                try:
+                    raw_bytes = next(self._rgen)
+                    self._frames[self._next_idx] = np.frombuffer(raw_bytes, dtype=np.uint16).reshape(self._h, self._w).copy()
+                    self._next_idx += 1
+                except StopIteration:
+                    return None
+        elif self._backend == 'cv2':
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            ret, frame = self.cap.read()
+            if ret:
+                self._frames[idx] = frame
 
         return self._frames.get(idx)
 
@@ -159,7 +258,12 @@ class DepthFrameReader:
             del self._frames[k]
 
     def close(self):
-        self.container.close()
+        if self._backend == 'av':
+            self.container.close()
+        elif self._backend == 'iio_ff':
+            self._rgen.close()
+        elif self._backend == 'cv2':
+            self.cap.release()
 
 
 # ---------------------------------------------------------------------------
@@ -184,12 +288,22 @@ def process_pose_cameras(session_dir, matched_rows, calib_npz_path,
     with open(meta_path, 'r') as f:
         meta = json.load(f)
 
+    intrinsics_path = find_intrinsics_npz(session_dir, calib_npz_path)
+    if intrinsics_path:
+        print(f"Using high-precision intrinsics from {intrinsics_path}")
+        intrinsics_data = load_npz_dict(intrinsics_path)
+    else:
+        print("High-precision intrinsics not found; falling back to metadata.json")
+        intrinsics_data = None
+
     # Prepare per-camera data
     cam_data = {}
     for cam_id in pose_cams:
         cam_meta = meta['cameras'][str(cam_id)]
         depth_scale = cam_meta['depth_storage']['depth_scale_meters_per_unit']
-        intr = cam_meta['intrinsics']
+        intr = intrinsics_from_npz(intrinsics_data, cam_id)
+        if intr is None:
+            intr = cam_meta.get('calibration', {}).get('color_intrinsics') or cam_meta['intrinsics']
         K = np.array([
             [intr['fx'], 0, intr['ppx']],
             [0, intr['fy'], intr['ppy']],
@@ -310,19 +424,15 @@ def main():
     matched_csv = args.matched_csv or os.path.join(session_dir, "matched_frames.csv")
     output_path = args.output or os.path.join(session_dir, "pose_results.csv")
 
-    # Default calib path: look in session_dir, then in calib_data
+    # Default calib path: session, parent recordings folder, then devel/record/recordings
     if args.calib_npz:
-        calib_npz = args.calib_npz
+        calib_npz = find_multicam_calibration(session_dir, args.calib_npz)
     else:
-        calib_in_session = os.path.join(session_dir, "multicam_calibration.npz")
-        calib_in_calib_data = os.path.join(session_dir, "calib_data", "multicam_calibration.npz")
-        if os.path.exists(calib_in_session):
-            calib_npz = calib_in_session
-        elif os.path.exists(calib_in_calib_data):
-            calib_npz = calib_in_calib_data
-        else:
-            print("Error: Cannot find multicam_calibration.npz. Use --calib-npz.")
-            sys.exit(1)
+        calib_npz = find_multicam_calibration(session_dir)
+
+    if not calib_npz:
+        print("Error: Cannot find multicam_calibration.npz. Use --calib-npz.")
+        sys.exit(1)
 
     # Default model paths: relative to this script
     script_dir = os.path.dirname(os.path.abspath(__file__))
