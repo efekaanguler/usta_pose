@@ -133,10 +133,6 @@ python_cmd() {
 
 mkdir -p "${CALIB_DIR}" "${EXTRINSIC_DIR}" "${RECORDINGS_DIR}"
 
-LOG_FILE="${CALIB_DIR}/calibration_$(date +%Y%m%d_%H%M%S).log"
-exec > >(tee -a "${LOG_FILE}") 2>&1
-
-log "Daily calibration log: ${LOG_FILE}"
 log "Recordings dir: ${RECORDINGS_DIR}"
 
 if [[ ! -f "${MASTER_INTRINSICS}" ]]; then
