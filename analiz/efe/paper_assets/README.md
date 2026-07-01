@@ -5,6 +5,13 @@ Title: Learning a Symbolic Nonverbal Vocabulary from Dyadic Pose and Gaze Intera
 Generated: 2026-05-30
 
 Combined PDF: `paper_assets/pdf/paper_figures_tables_appendix_pack.pdf`
+## LaTeX-Native Figure Pack
+
+- Editable source: `paper_assets/latex/paper_figures_latex.tex`
+- Compiled PDF: `paper_assets/pdf/paper_figures_latex.pdf`
+- Scope: Figures 1--6 and Appendix Figures A1--A3.
+- Rendering: All diagrams, plots, heatmaps, labels, and values are drawn directly with TikZ/PGFPlots. The source contains no `\includegraphics` command or raster-image reference.
+
 
 ## Recommended Figure/Table Placement
 
