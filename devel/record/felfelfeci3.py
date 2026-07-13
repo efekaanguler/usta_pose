@@ -726,6 +726,62 @@ def copy_latest_calibration_to_session(session_dir, recordings_dir):
     return str(destination)
 
 
+def capture_precheck_color_frames(cameras, timeout_s=5.0):
+    """Collect one latest color frame per camera from already-started threads."""
+    frames = {}
+    deadline = time.time() + float(timeout_s)
+
+    while time.time() < deadline and len(frames) < len(cameras):
+        for cam in cameras:
+            cam_id = cam.cam_idx + 1
+            if cam_id in frames:
+                continue
+            result = cam.get_latest_frame()
+            if result is None:
+                continue
+            color_image, _depth_image = result
+            frames[cam_id] = color_image.copy()
+        if len(frames) < len(cameras):
+            time.sleep(0.02)
+
+    missing = [cam.cam_idx + 1 for cam in cameras if cam.cam_idx + 1 not in frames]
+    return frames, missing
+
+
+def run_calibration_precheck(args, cameras, output_base):
+    """Run AprilTag cube calibration check before allowing recording."""
+    from calibration_checker import CalibrationChecker
+
+    if args.calib_check_layout is None:
+        raise ValueError("--calib-check requires --calib-check-layout /path/to/cube_layout.json")
+
+    calibration_npz = args.calib_check_npz
+    if calibration_npz is None:
+        calibration_npz = os.path.join(str(output_base), "multicam_calibration.npz")
+
+    frames_by_camera, missing = capture_precheck_color_frames(
+        cameras, timeout_s=args.calib_check_timeout
+    )
+    if missing:
+        raise RuntimeError(f"Could not capture pre-check frames from cameras: {missing}")
+
+    checker = CalibrationChecker(
+        calibration_npz,
+        args.calib_check_layout,
+        families=args.calib_check_family,
+        reference_camera=args.calib_check_ref_camera,
+        min_tags_per_camera=args.calib_check_min_tags,
+        min_points_per_camera=args.calib_check_min_points,
+        max_reprojection_error_px=args.calib_check_max_reproj_px,
+        max_rotation_error_deg=args.calib_check_max_rot_deg,
+        max_translation_error_mm=args.calib_check_max_trans_mm,
+        compare_to_reference_only=not args.calib_check_all_pairs,
+    )
+    result = checker.check(frames_by_camera)
+    checker.print_report(result)
+    return result
+
+
 
 def main(args):
     num_cameras = 4
@@ -800,6 +856,21 @@ def main(args):
             print("\nRunning in no-gui mode.")
         else:
             print("\nDISPLAY not found. Falling back to no-gui mode.")
+
+    if args.calib_check:
+        print("\nRunning AprilTag cube calibration pre-check...")
+        try:
+            precheck_result = run_calibration_precheck(args, cameras, output_base)
+        except Exception as exc:
+            print(f"\n\033[1;31mCalibration pre-check failed: {exc}\033[0m")
+            for cam in cameras:
+                cam.stop()
+            sys.exit(2)
+
+        if not precheck_result.ok:
+            for cam in cameras:
+                cam.stop()
+            sys.exit(2)
 
     # Main loop state
     is_recording = False
@@ -1059,6 +1130,41 @@ if __name__ == '__main__':
     )
     parser.add_argument('--no-gui', action='store_true',
                         help='Run without OpenCV windows (headless mode)')
+    parser.add_argument(
+        '--calib-check',
+        action='store_true',
+        help='Run AprilTag cube calibration pre-check before recording can start',
+    )
+    parser.add_argument(
+        '--calib-check-layout',
+        type=str,
+        default=None,
+        help='JSON file with cube AprilTag 3D corner coordinates',
+    )
+    parser.add_argument(
+        '--calib-check-npz',
+        type=str,
+        default=None,
+        help='Morning multicam_calibration.npz (default: {output_dir}/multicam_calibration.npz)',
+    )
+    parser.add_argument('--calib-check-family', type=str, default='tag36h11',
+                        help='AprilTag family for the cube tags')
+    parser.add_argument('--calib-check-ref-camera', type=int, default=1,
+                        help='Reference camera for pair checks')
+    parser.add_argument('--calib-check-timeout', type=float, default=5.0,
+                        help='Seconds to wait for one pre-check frame from each camera')
+    parser.add_argument('--calib-check-min-tags', type=int, default=1,
+                        help='Minimum known cube tags required per camera')
+    parser.add_argument('--calib-check-min-points', type=int, default=4,
+                        help='Minimum 2D-3D correspondences required per camera')
+    parser.add_argument('--calib-check-max-reproj-px', type=float, default=3.0,
+                        help='Maximum per-camera solvePnP reprojection error')
+    parser.add_argument('--calib-check-max-rot-deg', type=float, default=2.0,
+                        help='Maximum allowed camera-pair rotation delta in degrees')
+    parser.add_argument('--calib-check-max-trans-mm', type=float, default=20.0,
+                        help='Maximum allowed camera-pair translation delta in millimeters')
+    parser.add_argument('--calib-check-all-pairs', action='store_true',
+                        help='Compare every visible camera pair instead of only ref-camera pairs')
 
     args = parser.parse_args()
     main(args)

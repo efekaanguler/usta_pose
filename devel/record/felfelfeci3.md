@@ -101,6 +101,34 @@ Common options:
 --no-gui                 Run without OpenCV preview windows
 ```
 
+## Optional AprilTag Cube Calibration Pre-check
+
+Before recording starts, `felfelfeci3.py` can capture one live color frame from
+each camera, estimate the AprilTag cube pose with `solvePnP`, and compare the
+measured camera-to-camera transforms against the morning calibration NPZ.
+
+Run with:
+
+```bash
+python usta_pose/devel/record/felfelfeci3.py \
+  --output-dir usta_pose/devel/record/recordings \
+  --calib-check \
+  --calib-check-layout usta_pose/devel/record/apriltag_cube_layout.json \
+  --calib-check-npz usta_pose/devel/record/recordings/multicam_calibration.npz
+```
+
+Tune thresholds if needed:
+
+```text
+--calib-check-max-rot-deg 2.0
+--calib-check-max-trans-mm 20.0
+--calib-check-max-reproj-px 3.0
+```
+
+The cube layout JSON must contain exact CAD coordinates for each tag's four
+corners in a shared cube coordinate frame. See
+`apriltag_cube_layout.example.json` for the expected schema.
+
 ## Downstream Note
 
 The existing revised processing scripts currently look for `camX/color.mp4`.
