@@ -863,21 +863,6 @@ def main(args):
         else:
             print("\nDISPLAY not found. Falling back to no-gui mode.")
 
-    if args.calib_check:
-        print("\nRunning AprilTag cube calibration pre-check...")
-        try:
-            precheck_result = run_calibration_precheck(args, cameras, output_base)
-        except Exception as exc:
-            print(f"\n\033[1;31mCalibration pre-check failed: {exc}\033[0m")
-            for cam in cameras:
-                cam.stop()
-            sys.exit(2)
-
-        if not precheck_result.ok:
-            for cam in cameras:
-                cam.stop()
-            sys.exit(2)
-
     # Main loop state
     is_recording = False
     session_dir = None
@@ -887,7 +872,18 @@ def main(args):
     def start_recording_session():
         nonlocal is_recording, session_dir, session_start_time, session_calibration_path
         if is_recording:
-            return
+            return True
+
+        if args.calib_check:
+            print("\nRunning AprilTag cube calibration pre-check before recording...")
+            try:
+                precheck_result = run_calibration_precheck(args, cameras, output_base)
+            except Exception as exc:
+                print(f"\n\033[1;31mCalibration pre-check failed: {exc}\033[0m")
+                return False
+
+            if not precheck_result.ok:
+                return False
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         session_dir = str(output_base / f"session_{timestamp}")
@@ -901,6 +897,7 @@ def main(args):
         record_event.set()
         is_recording = True
         print(f"\nRecording started -> {session_dir}")
+        return True
 
     def stop_recording_session():
         nonlocal is_recording
@@ -1015,9 +1012,15 @@ def main(args):
                        for _ in range(num_cameras)]
 
     if use_gui:
-        print("\nReady. Press R to start recording, Q to quit.")
+        if args.calib_check:
+            print("\nReady. Check camera views first. Press R to run pre-check and start recording, Q to quit.")
+        else:
+            print("\nReady. Press R to start recording, Q to quit.")
     else:
-        print("\nReady. Recording will start automatically. Press Ctrl+C to stop.")
+        if args.calib_check:
+            print("\nReady. Recording will run pre-check automatically. Press Ctrl+C to stop.")
+        else:
+            print("\nReady. Recording will start automatically. Press Ctrl+C to stop.")
 
     try:
         last_status_log = 0.0
@@ -1070,7 +1073,8 @@ def main(args):
             else:
                 # --- Headless mode: auto-start and periodic terminal status ---
                 if not is_recording:
-                    start_recording_session()
+                    if not start_recording_session():
+                        break
 
                 now = time.time()
                 if now - last_status_log >= 1.0 and session_start_time is not None:
@@ -1087,7 +1091,8 @@ def main(args):
 
             if key == ord('r'):
                 if not is_recording:
-                    start_recording_session()
+                    if not start_recording_session():
+                        break
 
                 else:
                     stop_recording_session()
