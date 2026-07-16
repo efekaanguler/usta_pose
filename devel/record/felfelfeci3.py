@@ -752,8 +752,12 @@ def run_calibration_precheck(args, cameras, output_base):
     """Run AprilTag cube calibration check before allowing recording."""
     from calibration_checker import CalibrationChecker
 
-    if args.calib_check_layout is None:
-        raise ValueError("--calib-check requires --calib-check-layout /path/to/cube_layout.json")
+    if not os.path.exists(args.calib_check_layout):
+        raise FileNotFoundError(
+            "AprilTag cube layout JSON not found: "
+            f"{args.calib_check_layout}. Create it once from "
+            "apriltag_cube_layout.example.json using the real CAD coordinates."
+        )
 
     calibration_npz = args.calib_check_npz
     if calibration_npz is None:
@@ -773,12 +777,14 @@ def run_calibration_precheck(args, cameras, output_base):
         min_tags_per_camera=args.calib_check_min_tags,
         min_points_per_camera=args.calib_check_min_points,
         max_reprojection_error_px=args.calib_check_max_reproj_px,
+        min_normal_facing_cos=args.calib_check_min_normal_cos,
         max_rotation_error_deg=args.calib_check_max_rot_deg,
         max_translation_error_mm=args.calib_check_max_trans_mm,
         compare_to_reference_only=not args.calib_check_all_pairs,
     )
     result = checker.check(frames_by_camera)
     checker.print_report(result)
+
     return result
 
 
@@ -1132,14 +1138,22 @@ if __name__ == '__main__':
                         help='Run without OpenCV windows (headless mode)')
     parser.add_argument(
         '--calib-check',
+        dest='calib_check',
         action='store_true',
-        help='Run AprilTag cube calibration pre-check before recording can start',
+        default=True,
+        help='Run AprilTag cube calibration pre-check before recording can start (default: ON)',
+    )
+    parser.add_argument(
+        '--no-calib-check',
+        dest='calib_check',
+        action='store_false',
+        help='Skip AprilTag cube calibration pre-check',
     )
     parser.add_argument(
         '--calib-check-layout',
         type=str,
-        default=None,
-        help='JSON file with cube AprilTag 3D corner coordinates',
+        default=os.path.join(script_dir, 'apriltag_cube_layout.json'),
+        help='JSON file with cube AprilTag 3D corner coordinates (default: record/apriltag_cube_layout.json)',
     )
     parser.add_argument(
         '--calib-check-npz',
@@ -1159,6 +1173,8 @@ if __name__ == '__main__':
                         help='Minimum 2D-3D correspondences required per camera')
     parser.add_argument('--calib-check-max-reproj-px', type=float, default=3.0,
                         help='Maximum per-camera solvePnP reprojection error')
+    parser.add_argument('--calib-check-min-normal-cos', type=float, default=0.05,
+                        help='Minimum visible-face normal facing score; +1 faces camera, 0 is grazing, negative faces away')
     parser.add_argument('--calib-check-max-rot-deg', type=float, default=2.0,
                         help='Maximum allowed camera-pair rotation delta in degrees')
     parser.add_argument('--calib-check-max-trans-mm', type=float, default=20.0,
