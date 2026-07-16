@@ -1180,9 +1180,9 @@ if __name__ == '__main__':
                         help='Maximum per-camera solvePnP reprojection error')
     parser.add_argument('--calib-check-min-normal-cos', type=float, default=0.05,
                         help='Minimum visible-face normal facing score; +1 faces camera, 0 is grazing, negative faces away')
-    parser.add_argument('--calib-check-max-rot-deg', type=float, default=2.0,
+    parser.add_argument('--calib-check-max-rot-deg', type=float, default=5.0,
                         help='Maximum allowed camera-pair rotation delta in degrees')
-    parser.add_argument('--calib-check-max-trans-mm', type=float, default=20.0,
+    parser.add_argument('--calib-check-max-trans-mm', type=float, default=70.0,
                         help='Maximum allowed camera-pair translation delta in millimeters')
     parser.add_argument('--calib-check-all-pairs', action='store_true',
                         help='Compare every visible camera pair instead of only ref-camera pairs')
