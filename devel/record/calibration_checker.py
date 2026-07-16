@@ -111,9 +111,10 @@ class CalibrationChecker:
         min_points_per_camera: int = 4,
         max_reprojection_error_px: float = 3.0,
         min_normal_facing_cos: float = 0.05,
-        max_rotation_error_deg: float = 2.0,
-        max_translation_error_mm: float = 20.0,
+        max_rotation_error_deg: float = 4.0,
+        max_translation_error_mm: float = 50.0,
         compare_to_reference_only: bool = True,
+        require_all_cameras: bool = True,
     ):
         self.calibration_npz = Path(calibration_npz)
         self.cube_layout_json = Path(cube_layout_json)
@@ -126,6 +127,7 @@ class CalibrationChecker:
         self.max_rotation_error_deg = float(max_rotation_error_deg)
         self.max_translation_error_mm = float(max_translation_error_mm)
         self.compare_to_reference_only = bool(compare_to_reference_only)
+        self.require_all_cameras = bool(require_all_cameras)
 
         self.detector = _load_apriltag_detector(families)
         self.tag_corners, self.tag_centers, self.tag_normals = self._load_cube_layout(self.cube_layout_json)
@@ -480,24 +482,26 @@ class CalibrationChecker:
 
     def check(self, frames_by_camera: Dict[int, np.ndarray]) -> CalibrationCheckResult:
         poses = {}
+        expected_cameras = sorted(cam_id for cam_id in frames_by_camera.keys() if cam_id in self.K)
         for cam_id, image in sorted(frames_by_camera.items()):
             if cam_id not in self.K:
                 continue
             pose = self.estimate_camera_pose(cam_id, image)
             if pose is not None:
                 poses[cam_id] = pose
+        missing_pose_cameras = sorted(set(expected_cameras) - set(poses.keys()))
 
         if len(poses) < 2:
             return CalibrationCheckResult(
                 ok=False,
                 camera_poses=poses,
                 pair_checks=[],
-                failed_cameras=sorted(set(frames_by_camera.keys()) - set(poses.keys())),
+                failed_cameras=missing_pose_cameras,
                 message="Need at least two cameras with valid AprilTag cube pose.",
             )
 
         pair_checks = []
-        failed_cameras = set()
+        failed_cameras = set(missing_pose_cameras)
 
         for cam_a, cam_b in self._pairs_to_compare(poses.keys()):
             T_calib = self._calibrated_cam_to_cam(cam_a, cam_b)
@@ -531,9 +535,15 @@ class CalibrationChecker:
                 ok=pair_ok,
             ))
 
-        ok = bool(pair_checks) and all(pair.ok for pair in pair_checks)
+        all_required_seen = (not self.require_all_cameras) or not missing_pose_cameras
+        ok = bool(pair_checks) and all(pair.ok for pair in pair_checks) and all_required_seen
         if ok:
             message = "KALIBRASYON OK: Session baslatilabilir."
+        elif self.require_all_cameras and missing_pose_cameras:
+            message = (
+                "HATA: Her kamera AprilTag kupu gormeli. "
+                f"Eksik/hatali kamera(lar): {missing_pose_cameras}"
+            )
         else:
             message = "HATA: Kalibrasyon bozulmus olabilir. Kayit yapilamaz."
 

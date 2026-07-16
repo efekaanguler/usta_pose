@@ -781,6 +781,7 @@ def run_calibration_precheck(args, cameras, output_base):
         max_rotation_error_deg=args.calib_check_max_rot_deg,
         max_translation_error_mm=args.calib_check_max_trans_mm,
         compare_to_reference_only=not args.calib_check_all_pairs,
+        require_all_cameras=not args.calib_check_allow_partial,
     )
     result = checker.check(frames_by_camera)
     checker.print_report(result)
@@ -868,22 +869,33 @@ def main(args):
     session_dir = None
     session_start_time = None
     session_calibration_path = None
+    calib_precheck_ok = not args.calib_check
+
+    def run_precheck_gate():
+        nonlocal calib_precheck_ok
+        print("\nRunning AprilTag cube calibration pre-check...")
+        try:
+            precheck_result = run_calibration_precheck(args, cameras, output_base)
+        except Exception as exc:
+            print(f"\n\033[1;31mCalibration pre-check failed: {exc}\033[0m")
+            calib_precheck_ok = False
+            return False
+
+        calib_precheck_ok = bool(precheck_result.ok)
+        if calib_precheck_ok:
+            print("\n\033[1;32mPre-check OK. Press R to start recording.\033[0m")
+        else:
+            print("\n\033[1;31mPre-check failed. Adjust cube/cameras and press C again.\033[0m")
+        return calib_precheck_ok
 
     def start_recording_session():
         nonlocal is_recording, session_dir, session_start_time, session_calibration_path
         if is_recording:
             return True
 
-        if args.calib_check:
-            print("\nRunning AprilTag cube calibration pre-check before recording...")
-            try:
-                precheck_result = run_calibration_precheck(args, cameras, output_base)
-            except Exception as exc:
-                print(f"\n\033[1;31mCalibration pre-check failed: {exc}\033[0m")
-                return False
-
-            if not precheck_result.ok:
-                return False
+        if args.calib_check and not calib_precheck_ok:
+            print("\n\033[1;33mRecord locked: press C and get calibration OK before pressing R.\033[0m")
+            return False
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         session_dir = str(output_base / f"session_{timestamp}")
@@ -900,7 +912,7 @@ def main(args):
         return True
 
     def stop_recording_session():
-        nonlocal is_recording
+        nonlocal is_recording, calib_precheck_ok
         if not is_recording:
             return
 
@@ -998,10 +1010,12 @@ def main(args):
         )
 
         is_recording = False
+        if args.calib_check:
+            calib_precheck_ok = False
         print(f"Recording stopped. Frames: {frame_counts}")
         print(f"Metadata saved to {metadata_path}")
 
-    window_name = "4-Camera Session (R=Record, Q=Quit)"
+    window_name = "4-Camera Session (C=Calib, R=Record, Q=Quit)"
     if use_gui:
         cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
 
@@ -1013,7 +1027,7 @@ def main(args):
 
     if use_gui:
         if args.calib_check:
-            print("\nReady. Check camera views first. Press R to run pre-check and start recording, Q to quit.")
+            print("\nReady. Check camera views first. Press C to run pre-check, R to record after OK, Q to quit.")
         else:
             print("\nReady. Press R to start recording, Q to quit.")
     else:
@@ -1050,6 +1064,17 @@ def main(args):
                 row2 = np.hstack(grid_images[2:4])
                 combined = np.vstack([row1, row2])
 
+                if args.calib_check:
+                    if calib_precheck_ok:
+                        status_text = "Calibration OK - Press R to start recording | Q quit"
+                        status_color = (0, 255, 0)
+                    else:
+                        status_text = "Press C for calibration pre-check | R locked | Q quit"
+                        status_color = (0, 255, 255)
+                    cv2.rectangle(combined, (0, 0), (combined.shape[1], 42), (0, 0, 0), -1)
+                    cv2.putText(combined, status_text, (18, 28),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2, cv2.LINE_AA)
+
                 cv2.imshow(window_name, combined)
                 key = cv2.waitKey(1) & 0xFF
             elif use_gui:
@@ -1073,6 +1098,9 @@ def main(args):
             else:
                 # --- Headless mode: auto-start and periodic terminal status ---
                 if not is_recording:
+                    if args.calib_check and not calib_precheck_ok:
+                        if not run_precheck_gate():
+                            break
                     if not start_recording_session():
                         break
 
@@ -1089,10 +1117,13 @@ def main(args):
             if key == ord('q') or key == 27:
                 break
 
+            if key == ord('c') and args.calib_check and not is_recording:
+                run_precheck_gate()
+                continue
+
             if key == ord('r'):
                 if not is_recording:
-                    if not start_recording_session():
-                        break
+                    start_recording_session()
 
                 else:
                     stop_recording_session()
@@ -1180,12 +1211,14 @@ if __name__ == '__main__':
                         help='Maximum per-camera solvePnP reprojection error')
     parser.add_argument('--calib-check-min-normal-cos', type=float, default=0.05,
                         help='Minimum visible-face normal facing score; +1 faces camera, 0 is grazing, negative faces away')
-    parser.add_argument('--calib-check-max-rot-deg', type=float, default=5.0,
+    parser.add_argument('--calib-check-max-rot-deg', type=float, default=4.0,
                         help='Maximum allowed camera-pair rotation delta in degrees')
-    parser.add_argument('--calib-check-max-trans-mm', type=float, default=70.0,
+    parser.add_argument('--calib-check-max-trans-mm', type=float, default=50.0,
                         help='Maximum allowed camera-pair translation delta in millimeters')
     parser.add_argument('--calib-check-all-pairs', action='store_true',
                         help='Compare every visible camera pair instead of only ref-camera pairs')
+    parser.add_argument('--calib-check-allow-partial', action='store_true',
+                        help='Allow pre-check to pass when only a subset of cameras see the cube')
 
     args = parser.parse_args()
     main(args)
