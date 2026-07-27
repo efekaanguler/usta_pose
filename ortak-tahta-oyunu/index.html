@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#132a38" />
+    <meta
+      name="description"
+      content="USTA Ortak Tahta: iki oyunculu, gizli hedefli iş birliği ve takas oyunu."
+    />
+    <meta property="og:title" content="USTA — Ortak Tahta" />
+    <meta
+      property="og:description"
+      content="İş birliği içinde rekabet: ortak tamamla, gizli hedefinle puanla."
+    />
+    <meta property="og:url" content="https://efekaanguler.github.io/usta_pose/ortak-tahta-oyunu/" />
+    <meta property="og:image" content="https://efekaanguler.github.io/usta_pose/ortak-tahta-oyunu/public/og.png" />
+    <title>USTA — Ortak Tahta</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+
+    <header class="topbar">
+      <a class="brand" href="#" aria-label="USTA Ortak Tahta ana sayfa">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span><strong>USTA</strong><small>Ortak Tahta</small></span>
+      </a>
+      <div class="top-actions">
+        <button class="quiet-button" id="rulesButton" type="button">Nasıl oynanır?</button>
+        <button class="icon-button" id="soundButton" type="button" aria-label="Sesi kapat" aria-pressed="true">♪</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="setup-screen" id="setupScreen">
+        <div class="setup-copy">
+          <p class="eyebrow"><span></span> İKİ KİŞİ · 15 DAKİKA</p>
+          <h1>Ortak tamamla.<br /><em>Gizli hedefinle kazan.</em></h1>
+          <p class="intro">
+            Aynı tahtayı birlikte doldurun, ihtiyacınız olan diskler için pazarlık edin.
+            Tahta ortak; puanlarınız size özel.
+          </p>
+
+          <div class="scenario-picker" role="radiogroup" aria-label="Senaryo seçimi">
+            <button class="scenario-card selected" data-scenario="1" role="radio" aria-checked="true" type="button">
+              <span class="scenario-number">01</span>
+              <span><strong>Çapraz hedefler</strong><small>Orijinal el dağılımı</small></span>
+              <span class="radio-dot"></span>
+            </button>
+            <button class="scenario-card" data-scenario="2" role="radio" aria-checked="false" type="button">
+              <span class="scenario-number">02</span>
+              <span><strong>Roller değişir</strong><small>Eller ve hedefler tersine döner</small></span>
+              <span class="radio-dot"></span>
+            </button>
+          </div>
+
+          <div class="name-fields">
+            <label><span>P1 adı</span><input id="p1Name" value="Oyuncu 1" maxlength="18" /></label>
+            <label><span>P2 adı</span><input id="p2Name" value="Oyuncu 2" maxlength="18" /></label>
+          </div>
+
+          <button class="primary-button" id="startButton" type="button">
+            Oyunu başlat <span aria-hidden="true">→</span>
+          </button>
+          <button class="resume-button hidden" id="resumeButton" type="button">Kaldığın oyuna dön</button>
+        </div>
+
+        <div class="setup-visual" aria-label="Oyundaki renkli disklerden bir görünüm">
+          <div class="orbit orbit-one"></div>
+          <div class="orbit orbit-two"></div>
+          <div class="hero-disc disc-yellow"><span>1</span><small>●</small></div>
+          <div class="hero-disc disc-blue"><span>4</span><small>⬡</small></div>
+          <div class="hero-disc disc-red"><span>6</span><small>★</small></div>
+          <div class="hero-token p1-token">P1</div>
+          <div class="hero-token p2-token">P2</div>
+          <div class="visual-note"><span>18</span> hücre<br />tek ortak hedef</div>
+        </div>
+      </section>
+
+      <section class="game-screen hidden" id="gameScreen" aria-live="polite">
+        <div class="game-heading">
+          <div>
+            <p class="eyebrow"><span></span> <b id="scenarioLabel">SENARYO 1</b></p>
+            <h1>Ortak oyun tahtası</h1>
+          </div>
+          <div class="progress-block">
+            <span><b id="filledCount">0</b> / 18 hücre</span>
+            <div class="progress-track"><i id="progressBar"></i></div>
+          </div>
+        </div>
+
+        <div class="game-layout">
+          <aside class="player-panel player-one active" id="playerPanel1">
+            <div class="player-heading">
+              <div class="player-avatar">P1</div>
+              <div><small>OYUNCU 1</small><strong id="p1Display">Oyuncu 1</strong></div>
+              <button class="select-player" data-player="P1" type="button">Aktif</button>
+            </div>
+            <button class="secret-card" data-player="P1" type="button">
+              <span class="secret-front"><small>GİZLİ KİTAPÇIK</small><strong>Hedefi görmek için bas</strong><i>○</i></span>
+              <span class="secret-back" id="targetP1"></span>
+            </button>
+            <div class="hand-heading"><span>Elindeki diskler</span><b id="handCountP1">9</b></div>
+            <div class="hand" id="handP1"></div>
+          </aside>
+
+          <section class="board-area">
+            <div class="turn-banner" id="turnBanner">
+              <span class="turn-dot p1"></span>
+              <strong id="turnText">Oyuncu 1 oynuyor</strong>
+              <small id="turnHint">Elinden bir disk seç</small>
+            </div>
+            <div class="board" id="board" aria-label="3 satır 6 sütundan oluşan ortak oyun tahtası"></div>
+            <div class="board-legend">
+              <span><i class="legend-a"></i>A hedef hücresi</span>
+              <span><i class="legend-b"></i>B hedef hücresi</span>
+              <span><i class="legend-n"></i>N nötr hücre</span>
+            </div>
+            <div class="action-row">
+              <button class="secondary-button" id="tradeButton" type="button"><span>⇄</span> Takas yap <b id="tradeCount">0/6</b></button>
+              <button class="secondary-button" id="undoButton" type="button" disabled><span>↶</span> Geri al</button>
+              <button class="secondary-button" id="scoreButton" type="button"><span>◎</span> Puan özeti</button>
+            </div>
+          </section>
+
+          <aside class="player-panel player-two" id="playerPanel2">
+            <div class="player-heading">
+              <div class="player-avatar">P2</div>
+              <div><small>OYUNCU 2</small><strong id="p2Display">Oyuncu 2</strong></div>
+              <button class="select-player" data-player="P2" type="button">Seç</button>
+            </div>
+            <button class="secret-card" data-player="P2" type="button">
+              <span class="secret-front"><small>GİZLİ KİTAPÇIK</small><strong>Hedefi görmek için bas</strong><i>○</i></span>
+              <span class="secret-back" id="targetP2"></span>
+            </button>
+            <div class="hand-heading"><span>Elindeki diskler</span><b id="handCountP2">9</b></div>
+            <div class="hand" id="handP2"></div>
+          </aside>
+        </div>
+      </section>
+    </main>
+
+    <div class="toast" id="toast" role="status"></div>
+
+    <dialog id="rulesDialog" class="modal rules-modal">
+      <button class="modal-close" data-close type="button" aria-label="Kapat">×</button>
+      <p class="eyebrow"><span></span> OYUN AKIŞI</p>
+      <h2>Tahta ortak, puanlar kişisel.</h2>
+      <ol class="rule-list">
+        <li><b>01</b><span><strong>Disk seç</strong>Aktif oyuncunun elinden bir disk seç. Sıra zorunluluğu yok; oyuncuyu istediğin an değiştirebilirsin.</span></li>
+        <li><b>02</b><span><strong>Doğru hücreye koy</strong>Disk yalnızca üzerindeki sayıyla eşleşen boş bir hücreye yerleşir. Hücreye diski koyanın pulu eklenir.</span></li>
+        <li><b>03</b><span><strong>Takas et</strong>İki elden birer disk seçerek 1’e 1 takas yap. Oyun boyunca en fazla 6 takas kabul edilir.</span></li>
+        <li><b>04</b><span><strong>Birlikte bitir</strong>18 hücre tamamlanınca iki oyuncu da +20 alır. Gizli kitapçıklar yalnızca kendi pulunun olduğu hücreleri puanlar.</span></li>
+      </ol>
+      <button class="primary-button" data-close type="button">Anladım, başlayalım</button>
+    </dialog>
+
+    <dialog id="tradeDialog" class="modal trade-modal">
+      <button class="modal-close" data-close type="button" aria-label="Kapat">×</button>
+      <p class="eyebrow"><span></span> 1’E 1 TAKAS</p>
+      <h2>Karşılıklı birer disk seçin.</h2>
+      <p class="modal-copy">Seçimler iki tarafa da görünür. Onaylandığında diskler anında el değiştirir.</p>
+      <div class="trade-columns">
+        <div><h3 id="tradeNameP1">Oyuncu 1</h3><div class="trade-hand" id="tradeHandP1"></div></div>
+        <div><h3 id="tradeNameP2">Oyuncu 2</h3><div class="trade-hand" id="tradeHandP2"></div></div>
+      </div>
+      <button class="primary-button" id="confirmTrade" type="button" disabled>Takası onayla <span>⇄</span></button>
+    </dialog>
+
+    <dialog id="scoreDialog" class="modal score-modal">
+      <button class="modal-close" data-close type="button" aria-label="Kapat">×</button>
+      <p class="eyebrow"><span></span> CANLI PUAN ÖZETİ</p>
+      <h2 id="scoreTitle">Oyun devam ediyor</h2>
+      <div class="score-grid">
+        <div class="score-player p1"><small id="scoreNameP1">Oyuncu 1</small><strong id="scoreP1">0</strong><span id="scoreDetailP1">Hedef puanı: 0</span></div>
+        <div class="score-vs">—</div>
+        <div class="score-player p2"><small id="scoreNameP2">Oyuncu 2</small><strong id="scoreP2">0</strong><span id="scoreDetailP2">Hedef puanı: 0</span></div>
+      </div>
+      <div class="completion-bonus" id="completionBonus"><span>+20</span><div><strong>Ortak tamamlama bonusu</strong><small>18 hücre dolduğunda iki oyuncuya da eklenir.</small></div></div>
+      <button class="primary-button" data-close type="button">Oyuna dön</button>
+      <button class="text-button" id="newGameButton" type="button">Yeni oyun kur</button>
+    </dialog>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
