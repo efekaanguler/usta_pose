@@ -6,16 +6,16 @@
     <meta name="theme-color" content="#132a38" />
     <meta
       name="description"
-      content="USTA Ortak Tahta: iki oyunculu, gizli hedefli iş birliği ve takas oyunu."
+      content="USTA Zincirli Ortak Tahta: üç paralel zincir, iki zorunlu takas ve gizli puan oyunu."
     />
-    <meta property="og:title" content="USTA — Ortak Tahta" />
+    <meta property="og:title" content="USTA — Zincirli Ortak Tahta" />
     <meta
       property="og:description"
-      content="İş birliği içinde rekabet: ortak tamamla, gizli hedefinle puanla."
+      content="Üç paralel zincir, iki zorunlu takas ve bireysel gizli puan."
     />
     <meta property="og:url" content="https://efekaanguler.github.io/usta_pose/ortak-tahta-oyunu/" />
-    <meta property="og:image" content="https://efekaanguler.github.io/usta_pose/ortak-tahta-oyunu/public/og.png" />
-    <title>USTA — Ortak Tahta</title>
+    <meta property="og:image" content="https://efekaanguler.github.io/usta_pose/ortak-tahta-oyunu/public/og-zincirli-v2.png" />
+    <title>USTA — Zincirli Ortak Tahta</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -28,9 +28,9 @@
     <div class="grain" aria-hidden="true"></div>
 
     <header class="topbar">
-      <a class="brand" href="#" aria-label="USTA Ortak Tahta ana sayfa">
+      <a class="brand" href="#" aria-label="USTA Zincirli Ortak Tahta ana sayfa">
         <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span><strong>USTA</strong><small>Ortak Tahta</small></span>
+        <span><strong>USTA</strong><small>Zincirli Ortak Tahta</small></span>
       </a>
       <div class="top-actions">
         <button class="quiet-button" id="rulesButton" type="button">Nasıl oynanır?</button>
@@ -41,11 +41,11 @@
     <main>
       <section class="setup-screen" id="setupScreen">
         <div class="setup-copy">
-          <p class="eyebrow"><span></span> İKİ KİŞİ · 15 DAKİKA</p>
-          <h1>Ortak tamamla.<br /><em>Gizli hedefinle kazan.</em></h1>
+          <p class="eyebrow"><span></span> İKİ KİŞİ · ~15 DAKİKA</p>
+          <h1>Zinciri birlikte kur.<br /><em>Gizli hedefinle kazan.</em></h1>
           <p class="intro">
-            Aynı tahtayı birlikte doldurun, ihtiyacınız olan diskler için pazarlık edin.
-            Tahta ortak; puanlarınız size özel.
+            Üç zinciri soldan sağa birlikte tamamlayın, kilitli özel hücreler için
+            pazarlık edin. Görevler açık; puan değerleri size özel.
           </p>
 
           <div class="scenario-picker" role="radiogroup" aria-label="Senaryo seçimi">
@@ -80,7 +80,7 @@
           <div class="hero-disc disc-red"><span>6</span><small>★</small></div>
           <div class="hero-token p1-token">P1</div>
           <div class="hero-token p2-token">P2</div>
-          <div class="visual-note"><span>18</span> hücre<br />tek ortak hedef</div>
+          <div class="visual-note"><span>3</span> paralel<br />ortak zincir</div>
         </div>
       </section>
 
@@ -88,7 +88,7 @@
         <div class="game-heading">
           <div>
             <p class="eyebrow"><span></span> <b id="scenarioLabel">SENARYO 1</b></p>
-            <h1>Ortak oyun tahtası</h1>
+            <h1>Üç paralel zincir</h1>
           </div>
           <div class="progress-block">
             <span><b id="filledCount">0</b> / 18 hücre</span>
@@ -119,9 +119,10 @@
             </div>
             <div class="board" id="board" aria-label="3 satır 6 sütundan oluşan ortak oyun tahtası"></div>
             <div class="board-legend">
-              <span><i class="legend-a"></i>A hedef hücresi</span>
-              <span><i class="legend-b"></i>B hedef hücresi</span>
-              <span><i class="legend-n"></i>N nötr hücre</span>
+              <span id="aLegend"><i class="legend-a"></i>A · bonus hücresi</span>
+              <span id="bLegend"><i class="legend-b"></i>B · bonus hücresi</span>
+              <span><i class="legend-n"></i>N · nötr hücre</span>
+              <span><i class="legend-special">Ö</i>Özel pul · sahibi sabit</span>
             </div>
             <div class="action-row">
               <button class="secondary-button" id="tradeButton" type="button"><span>⇄</span> Takas yap <b id="tradeCount">0/6</b></button>
@@ -152,12 +153,12 @@
     <dialog id="rulesDialog" class="modal rules-modal">
       <button class="modal-close" data-close type="button" aria-label="Kapat">×</button>
       <p class="eyebrow"><span></span> OYUN AKIŞI</p>
-      <h2>Tahta ortak, puanlar kişisel.</h2>
+        <h2>Üç zincir, dört özel kilit.</h2>
       <ol class="rule-list">
-        <li><b>01</b><span><strong>Disk seç</strong>Aktif oyuncunun elinden bir disk seç. Sıra zorunluluğu yok; oyuncuyu istediğin an değiştirebilirsin.</span></li>
-        <li><b>02</b><span><strong>Doğru hücreye koy</strong>Disk yalnızca üzerindeki sayıyla eşleşen boş bir hücreye yerleşir. Hücreye diski koyanın pulu eklenir.</span></li>
-        <li><b>03</b><span><strong>Takas et</strong>İki elden birer disk seçerek 1’e 1 takas yap. Oyun boyunca en fazla 6 takas kabul edilir.</span></li>
-        <li><b>04</b><span><strong>Birlikte bitir</strong>18 hücre tamamlanınca iki oyuncu da +20 alır. Gizli kitapçıklar yalnızca kendi pulunun olduğu hücreleri puanlar.</span></li>
+        <li><b>01</b><span><strong>Zinciri ilerlet</strong>Her satır fiziksel olarak soldan sağa ilerler. İkinci satır 6→5→4→3→2→1 dizilimindedir; disk yine hücrede yazan sayıyla eşleşir.</span></li>
+        <li><b>02</b><span><strong>Özel kilidi aç</strong>A/B/N düzeni bütün tahtada geçerlidir. Yalnızca 3A, 4B, 5A ve 6B hücrelerindeki Özel P1/P2 pulları sabittir; bu hücreleri pulun sahibi tamamlar.</span></li>
+        <li><b>03</b><span><strong>Şekil serbest</strong>Özel pullu hücreler doğru numaraya sahip her şekli kabul eder. Şekil, hamlenin geçerliliğini değil yalnızca gizli puanı etkiler.</span></li>
+        <li><b>04</b><span><strong>İki hamlede devret</strong>Bir oyuncu üst üste en fazla iki disk koyabilir; ardından karşı oyuncu en az bir disk koymalıdır. Takas bu sayacı sıfırlamaz. 18 hücre tamamlanınca iki oyuncu da +20 alır.</span></li>
       </ol>
       <button class="primary-button" data-close type="button">Anladım, başlayalım</button>
     </dialog>
@@ -176,7 +177,7 @@
 
     <dialog id="scoreDialog" class="modal score-modal">
       <button class="modal-close" data-close type="button" aria-label="Kapat">×</button>
-      <p class="eyebrow"><span></span> CANLI PUAN ÖZETİ</p>
+      <p class="eyebrow"><span></span> PUAN ÖZETİ</p>
       <h2 id="scoreTitle">Oyun devam ediyor</h2>
       <div class="score-grid">
         <div class="score-player p1"><small id="scoreNameP1">Oyuncu 1</small><strong id="scoreP1">0</strong><span id="scoreDetailP1">Hedef puanı: 0</span></div>

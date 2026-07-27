@@ -1,6 +1,6 @@
-# USTA — Ortak Tahta
+# USTA — Zincirli Ortak Tahta
 
-İki oyunculu, aynı cihazda oynanan interaktif gizli hedef ve takas oyunu.
+İki oyunculu, aynı cihazda oynanan üç paralel zincir, gizli puan ve takas oyunu.
 
 ## Yerelde açma
 
@@ -25,7 +25,15 @@ Bu deponun GitHub Pages adresi etkinleştirildiğinde oyun şu adreste açılır
 ## Oyun kontrolleri
 
 - Oyuncu panelindeki **Seç** düğmesiyle aktif oyuncuyu değiştirin.
-- Aktif oyuncunun elinden bir diske, ardından aynı numaralı boş hücreye basın.
+- Her satır fiziksel olarak soldan sağa ilerler. İkinci satır soldan sağa
+  6→5→4→3→2→1 dizilidir.
+- İlk tasarımdaki A/B/N dağılımı bütün tahtada korunur.
+- Yalnızca bu dört hücredeki Özel P1/P2 pulları sabittir; sahipleri senaryoya
+  göre oyun kurulurken belirlenir ve oyun sırasında değişmez.
+- Özel pullu hücrelerde şekil kısıtlaması yoktur; doğru numaralı her disk
+  gelebilir. Şekiller yalnızca gizli puan hesabını etkiler.
+- Bir oyuncu üst üste en fazla iki disk koyabilir. İkinci yerleştirmeden sonra
+  aktif oyuncu otomatik değişir; takas bu sınırı sıfırlamaz.
 - **Takas yap** ile iki elden birer disk seçin; en fazla 6 takas yapılabilir.
 - Gizli kitapçık kartına basarak hedefi açıp kapatın.
 - Oyun tarayıcıda otomatik kaydedilir.

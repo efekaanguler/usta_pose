@@ -130,6 +130,7 @@ h1, h2 { font-family: "Space Grotesk", sans-serif; margin: 0; letter-spacing: -.
 .player-heading strong { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .select-player { border: 0; border-radius: 99px; background: var(--p1-soft); color: var(--p1); padding: 6px 9px; font-size: 11px; font-weight: 800; cursor: pointer; }
 .player-two .select-player { color: var(--p2); background: var(--p2-soft); }
+.select-player:disabled { cursor: not-allowed; opacity: .48; }
 .secret-card { width: 100%; min-height: 116px; margin: 16px 0 20px; border: 0; border-radius: 13px; background: var(--ink); color: white; padding: 16px; text-align: left; cursor: pointer; overflow: hidden; position: relative; }
 .player-two .secret-card { background: #4b302b; }
 .secret-card::after { content: ""; position: absolute; width: 90px; height: 90px; border: 1px solid rgba(255,255,255,.15); border-radius: 50%; right: -16px; bottom: -32px; }
@@ -163,9 +164,14 @@ h1, h2 { font-family: "Space Grotesk", sans-serif; margin: 0; letter-spacing: -.
 .board-cell.type-B { background: var(--b); }
 .board-cell.eligible { cursor: pointer; box-shadow: inset 0 0 0 3px var(--gold); transform: translateY(-2px); }
 .board-cell.eligible:hover { transform: translateY(-4px); box-shadow: inset 0 0 0 3px var(--ink), 0 8px 14px rgba(19,42,56,.12); }
+.board-cell.chain-locked { opacity: .47; background-image: repeating-linear-gradient(135deg, transparent 0 7px, rgba(19,42,56,.035) 7px 9px); }
+.board-cell.special-cell { border-width: 2px; }
+.board-cell.special-cell { border-color: #745ca7; box-shadow: inset 0 0 0 1px rgba(116,92,167,.18); }
 .cell-meta { position: absolute; top: 7px; left: 9px; display: flex; flex-direction: column; line-height: 1; z-index: 1; }
 .cell-meta b { font-family: "Space Grotesk"; font-size: 17px; }
 .cell-meta small { color: var(--muted); font-size: 8px; font-weight: 900; margin-top: 4px; }
+.special-seal { position: absolute; z-index: 4; top: -8px; right: -8px; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; color: white; background: var(--p1); border: 3px solid #745ca7; box-shadow: 0 4px 9px rgba(19,42,56,.2); font-size: 8px; font-weight: 900; letter-spacing: -.03em; }
+.special-seal.p2 { background: var(--p2); }
 .placed-disk { position: absolute; width: 69%; aspect-ratio: 1; border-radius: 50%; left: 50%; top: 51%; transform: translate(-50%,-50%); display: grid; place-items: center; color: white; border: 3px solid rgba(255,255,255,.62); box-shadow: 0 7px 12px rgba(19,42,56,.2), inset 0 -5px 0 rgba(0,0,0,.12); }
 .placed-disk.light { color: var(--ink); }
 .placed-disk strong { font-family: "Space Grotesk"; font-size: clamp(17px,2.1vw,30px); }
@@ -175,6 +181,7 @@ h1, h2 { font-family: "Space Grotesk", sans-serif; margin: 0; letter-spacing: -.
 .board-legend { display: flex; justify-content: center; gap: 18px; color: var(--muted); font-size: 10px; margin: 13px 0; }
 .board-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: -1px; margin-right: 4px; border: 1px solid var(--line); }
 .legend-a { background: var(--a); } .legend-b { background: var(--b); } .legend-n { background: var(--n); }
+.board-legend .legend-special { width: 18px; height: 18px; display: inline-grid; place-items: center; border-radius: 50%; color: white; background: #745ca7; border: 0; font-size: 8px; font-style: normal; font-weight: 900; vertical-align: -5px; }
 .action-row { display: grid; grid-template-columns: 1.3fr 1fr 1.2fr; gap: 8px; }
 .secondary-button { min-height: 42px; border: 1px solid var(--line); border-radius: 10px; background: var(--cream); cursor: pointer; font-size: 12px; font-weight: 800; }
 .secondary-button:hover:not(:disabled) { border-color: var(--ink); }
@@ -244,6 +251,7 @@ h1, h2 { font-family: "Space Grotesk", sans-serif; margin: 0; letter-spacing: -.
   .board-cell { border-radius: 7px; }
   .cell-meta { left: 5px; top: 5px; }
   .cell-meta b { font-size: 12px; }
+  .special-seal { width: 25px; height: 25px; top: -7px; right: -7px; border-width: 2px; font-size: 6px; }
   .placed-disk { width: 78%; border-width: 2px; }
   .owner-chip { width: 21px; height: 21px; }
   .hand { grid-template-columns: repeat(6,1fr); }

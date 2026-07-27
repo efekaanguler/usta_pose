@@ -20,16 +20,27 @@ const DISKS = [
 const DISK_MAP = Object.fromEntries(DISKS.map(disk => [disk.id, disk]));
 const SCENARIO_ONE_P1 = ["yellow-4", "green-2", "black-3", "black-6", "red-6", "navy-4", "gray-6", "white-2", "blue-5"];
 const SCENARIO_ONE_P2 = DISKS.map(disk => disk.id).filter(id => !SCENARIO_ONE_P1.includes(id));
+const BOARD_NUMBERS = [
+  [1, 2, 3, 4, 5, 6],
+  [6, 5, 4, 3, 2, 1],
+  [1, 2, 3, 4, 5, 6]
+];
 const BOARD_TYPES = [
   ["A", "B", "A", "N", "B", "N"],
   ["B", "N", "B", "A", "N", "A"],
   ["N", "A", "N", "B", "A", "B"]
 ];
+const SPECIAL_CELLS = {
+  8: { type: "B" },
+  9: { type: "A" },
+  16: { type: "A" },
+  17: { type: "B" }
+};
 const TARGETS = {
   circles: { cell: "A", primary: "Daire", primaryPoints: 4, secondary: "Kare", secondaryPoints: 3 },
   polygons: { cell: "B", primary: "Altıgen", primaryPoints: 4, secondary: "Yıldız", secondaryPoints: 3 }
 };
-const STORAGE_KEY = "usta-ortak-tahta-v1";
+const STORAGE_KEY = "usta-zincirli-ortak-tahta-v3";
 
 let state = null;
 let setupScenario = 1;
@@ -80,9 +91,52 @@ function escapeHtml(value) {
   return String(value).replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
 }
 
-function targetHtml(targetKey) {
+function targetHtml(targetKey, player) {
   const target = TARGETS[targetKey];
-  return `<small>GİZLİ HEDEF</small><strong><b>${target.cell}</b> hücresindeki her ${target.primary}: +${target.primaryPoints}</strong><strong><b>${target.cell}</b> hücresindeki her ${target.secondary}: +${target.secondaryPoints}</strong>`;
+  const cells = target.cell === "A" ? "3A ve 5A" : "4B ve 6B";
+  return `<small>GİZLİ PUAN DEĞERLERİ</small><strong><b>${target.cell}</b> hücresindeki her ${target.primary}: +${target.primaryPoints}</strong><strong><b>${target.cell}</b> hücresindeki her ${target.secondary}: +${target.secondaryPoints}</strong><small>${cells} yalnızca ${player} tarafından tamamlanır.</small>`;
+}
+
+function specialOwner(type) {
+  return Object.keys(state.targets).find(player => TARGETS[state.targets[player]].cell === type);
+}
+
+function cellNumber(index) {
+  const row = Math.floor(index / 6);
+  return BOARD_NUMBERS[row][index % 6];
+}
+
+function consecutivePlacementCount(player) {
+  let count = 0;
+  for (let index = state.history.length - 1; index >= 0; index -= 1) {
+    const action = state.history[index];
+    if (action.type !== "place") continue;
+    if (action.player !== player) break;
+    count += 1;
+  }
+  return count;
+}
+
+function placementIssue(disk, cellIndex, player) {
+  const row = Math.floor(cellIndex / 6);
+  const number = cellNumber(cellIndex);
+  if (state.board[cellIndex]) return "Bu hücre zaten dolu.";
+  if (consecutivePlacementCount(player) >= 2) {
+    const otherPlayer = player === "P1" ? "P2" : "P1";
+    return `${state.names[player]} üst üste iki disk koydu; şimdi ${state.names[otherPlayer]} bir disk koymalı.`;
+  }
+  if (disk.number !== number) return `Bu hücre ${number} numaralı bir disk bekliyor.`;
+  const rowStart = row * 6;
+  const firstGap = state.board.slice(rowStart, rowStart + 6).findIndex(placement => !placement);
+  if (firstGap !== cellIndex % 6) return `Bu zincirde önce ${cellNumber(rowStart + firstGap)} numaralı hücre tamamlanmalı.`;
+
+  const special = SPECIAL_CELLS[cellIndex];
+  if (special) {
+    const owner = specialOwner(special.type);
+    if (owner !== player) return `${number}${special.type} hücresini yalnızca ${state.names[owner]} tamamlayabilir.`;
+    return null;
+  }
+  return null;
 }
 
 function diskHtml(disk, extraClass = "") {
@@ -94,17 +148,24 @@ function renderBoard() {
   const board = $("#board");
   board.innerHTML = state.board.map((placement, index) => {
     const row = Math.floor(index / 6);
-    const number = index % 6 + 1;
-    const type = BOARD_TYPES[row][number - 1];
+    const column = index % 6;
+    const number = cellNumber(index);
+    const type = BOARD_TYPES[row][column];
     const selected = state.selectedDisk ? DISK_MAP[state.selectedDisk] : null;
-    const eligible = selected && !placement && selected.number === number;
+    const issue = selected ? placementIssue(selected, index, state.activePlayer) : null;
+    const eligible = selected && !issue;
+    const rowFirstGap = state.board.slice(row * 6, row * 6 + 6).findIndex(item => !item);
+    const chainLocked = !placement && rowFirstGap !== column;
+    const special = SPECIAL_CELLS[index];
     let content = "";
     if (placement) {
       const disk = DISK_MAP[placement.diskId];
       const light = LIGHT_COLORS.has(disk.color) ? " light" : "";
       content = `<div class="placed-disk${light}" style="background:${COLOR_VALUES[disk.color]}" title="${disk.color} · ${disk.number}/${disk.shape}"><strong>${disk.number}</strong><small>${SHAPE_ICONS[disk.shape]}</small></div><span class="owner-chip ${placement.owner.toLowerCase()}">${placement.owner}</span>`;
     }
-    return `<button class="board-cell type-${type}${eligible ? " eligible" : ""}" data-cell="${index}" type="button" aria-label="Satır ${row + 1}, ${number}${type}${placement ? `, ${DISK_MAP[placement.diskId].color} disk, ${placement.owner}` : ", boş"}"><span class="cell-meta"><b>${number}</b><small>${type}</small></span>${content}</button>`;
+    const owner = special ? specialOwner(type) : null;
+    const specialInfo = special ? `<span class="special-seal ${owner.toLowerCase()}">Ö${owner}</span>` : "";
+    return `<button class="board-cell type-${type}${eligible ? " eligible" : ""}${chainLocked ? " chain-locked" : ""}${special ? " special-cell" : ""}" data-cell="${index}" type="button" aria-label="Satır ${row + 1}, ${number}${type}${special ? `, ${specialOwner(type)} özel hücresi, her şekil kabul edilir` : ""}${placement ? `, ${DISK_MAP[placement.diskId].color} disk, ${placement.owner}` : ", boş"}"><span class="cell-meta"><b>${number}</b><small>${type}</small></span>${specialInfo}${content}</button>`;
   }).join("");
 }
 
@@ -123,12 +184,18 @@ function renderHands() {
 function renderPlayers() {
   $("#p1Display").textContent = state.names.P1;
   $("#p2Display").textContent = state.names.P2;
-  $("#targetP1").innerHTML = targetHtml(state.targets.P1);
-  $("#targetP2").innerHTML = targetHtml(state.targets.P2);
+  $("#targetP1").innerHTML = targetHtml(state.targets.P1, "P1");
+  $("#targetP2").innerHTML = targetHtml(state.targets.P2, "P2");
+  $("#aLegend").innerHTML = `<i class="legend-a"></i>A · bonus hücresi`;
+  $("#bLegend").innerHTML = `<i class="legend-b"></i>B · bonus hücresi`;
   ["P1", "P2"].forEach(player => {
     const active = state.activePlayer === player;
+    const waiting = consecutivePlacementCount(player) >= 2;
     $(`#playerPanel${player.slice(1)}`).classList.toggle("active", active);
-    $(`#playerPanel${player.slice(1)} .select-player`).textContent = active ? "Aktif" : "Seç";
+    const selectButton = $(`#playerPanel${player.slice(1)} .select-player`);
+    selectButton.textContent = waiting ? "Bekle" : active ? "Aktif" : "Seç";
+    selectButton.disabled = waiting;
+    selectButton.title = waiting ? "Karşı oyuncu bir disk koyduktan sonra yeniden oynayabilir." : "";
   });
   const activeNumber = state.activePlayer.slice(1);
   $("#turnText").textContent = `${state.names[state.activePlayer]} oynuyor`;
@@ -158,6 +225,12 @@ function render() {
 }
 
 function selectPlayer(player) {
+  if (consecutivePlacementCount(player) >= 2) {
+    const otherPlayer = player === "P1" ? "P2" : "P1";
+    showToast(`${state.names[player]} üst üste iki disk koydu; şimdi ${state.names[otherPlayer]} oynamalı.`);
+    sound("error");
+    return;
+  }
   state.activePlayer = player;
   state.selectedDisk = null;
   $$(".secret-card").forEach(card => card.classList.remove("revealed"));
@@ -167,6 +240,12 @@ function selectPlayer(player) {
 
 function selectDisk(id) {
   if (!state.hands[state.activePlayer].includes(id)) return;
+  if (consecutivePlacementCount(state.activePlayer) >= 2) {
+    const otherPlayer = state.activePlayer === "P1" ? "P2" : "P1";
+    showToast(`Üst üste üçüncü disk konamaz; şimdi ${state.names[otherPlayer]} oynamalı.`);
+    sound("error");
+    return;
+  }
   state.selectedDisk = state.selectedDisk === id ? null : id;
   sound("tap");
   render();
@@ -175,27 +254,32 @@ function selectDisk(id) {
 function placeDisk(cellIndex) {
   if (!state.selectedDisk || state.board[cellIndex]) return;
   const disk = DISK_MAP[state.selectedDisk];
-  const cellNumber = cellIndex % 6 + 1;
-  if (disk.number !== cellNumber) {
-    showToast(`Bu hücre ${cellNumber} numaralı bir disk bekliyor.`);
+  const issue = placementIssue(disk, cellIndex, state.activePlayer);
+  if (issue) {
+    showToast(issue);
     sound("error");
     return;
   }
+  const placedBy = state.activePlayer;
   state.history.push({
     type: "place",
-    player: state.activePlayer,
+    player: placedBy,
     diskId: disk.id,
     cellIndex
   });
-  state.board[cellIndex] = { diskId: disk.id, owner: state.activePlayer };
-  state.hands[state.activePlayer] = state.hands[state.activePlayer].filter(id => id !== disk.id);
+  state.board[cellIndex] = { diskId: disk.id, owner: placedBy };
+  state.hands[placedBy] = state.hands[placedBy].filter(id => id !== disk.id);
   state.selectedDisk = null;
+  const filled = state.board.filter(Boolean).length;
+  const mustYield = consecutivePlacementCount(placedBy) >= 2 && filled < 18;
+  if (mustYield) state.activePlayer = placedBy === "P1" ? "P2" : "P1";
   sound("place");
   render();
-  const filled = state.board.filter(Boolean).length;
   if (filled === 18) {
     showToast("Tahta tamamlandı — iki oyuncuya da +20!");
     setTimeout(() => openScore(true), 550);
+  } else if (mustYield) {
+    showToast(`${state.names[placedBy]} iki disk koydu; sıra ${state.names[state.activePlayer]}’da.`);
   }
 }
 
@@ -265,15 +349,15 @@ function openScore(forceReveal = false) {
   const p1Target = calculateScore("P1");
   const p2Target = calculateScore("P2");
   const bonus = complete ? 20 : 0;
-  $("#scoreTitle").textContent = complete ? "Tahta tamamlandı!" : "Oyun devam ediyor";
+  $("#scoreTitle").textContent = complete ? "Üç zincir tamamlandı!" : "Puanlar hâlâ gizli";
   $("#scoreNameP1").textContent = state.names.P1;
   $("#scoreNameP2").textContent = state.names.P2;
-  $("#scoreP1").textContent = p1Target + bonus;
-  $("#scoreP2").textContent = p2Target + bonus;
-  $("#scoreDetailP1").textContent = `Hedef ${p1Target} ${complete ? "+ ortak 20" : "· bonus kilitli"}`;
-  $("#scoreDetailP2").textContent = `Hedef ${p2Target} ${complete ? "+ ortak 20" : "· bonus kilitli"}`;
+  $("#scoreP1").textContent = complete ? p1Target + bonus : "?";
+  $("#scoreP2").textContent = complete ? p2Target + bonus : "?";
+  $("#scoreDetailP1").textContent = complete ? `Hedef ${p1Target} + ortak 20` : "Oyun sonunda açıklanır";
+  $("#scoreDetailP2").textContent = complete ? `Hedef ${p2Target} + ortak 20` : "Oyun sonunda açıklanır";
   $("#completionBonus").classList.toggle("earned", complete);
-  $("#completionBonus small").textContent = complete ? "Kazanıldı — iki skora da eklendi." : "18 hücre dolduğunda iki oyuncuya da eklenir.";
+  $("#completionBonus small").textContent = complete ? "Kazanıldı — iki skora da eklendi." : "Üç zincir tamamlandığında iki oyuncuya da eklenir.";
   $("#scoreDialog").showModal();
   if (forceReveal) sound("finish");
 }
@@ -287,6 +371,9 @@ function startGame(useSaved = false) {
       P1: $("#p1Name").value.trim(),
       P2: $("#p2Name").value.trim()
     });
+  }
+  if (consecutivePlacementCount(state.activePlayer) >= 2) {
+    state.activePlayer = state.activePlayer === "P1" ? "P2" : "P1";
   }
   $("#setupScreen").classList.add("hidden");
   $("#gameScreen").classList.remove("hidden");
