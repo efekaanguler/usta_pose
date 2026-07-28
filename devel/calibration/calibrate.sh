@@ -65,7 +65,7 @@ Options:
   --pairs 1,2 1,3 ...        Override cube/ChArUco camera pairs
   --num-captures N           Accepted captures per pair/session
   --min-cameras N            Cube-visible cameras in all-camera mode
-  --capture-interval SEC     Auto-capture interval hint
+  --capture-interval SEC     Automatic pre-capture countdown duration
   --ref-camera N             Reference camera, 1-indexed
   --min-pairs N              Minimum shared captures for stereo calibration
   -h, --help                 Show this help

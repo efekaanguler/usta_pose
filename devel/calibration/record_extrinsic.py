@@ -185,6 +185,74 @@ def build_cube_preview(
     return np.vstack([np.hstack(previews[:2]), np.hstack(previews[2:4])])
 
 
+def add_cube_countdown_overlay(preview, time_remaining):
+    overlay = preview.copy()
+    height, width = overlay.shape[:2]
+    center = (width // 2, height // 2)
+
+    if time_remaining > 0:
+        pulse = 1.0 + 0.2 * np.sin(time_remaining * np.pi)
+        radius = int(78 * pulse)
+        cv2.circle(overlay, center, radius, (0, 255, 255), -1, cv2.LINE_AA)
+        overlay = cv2.addWeighted(preview, 0.35, overlay, 0.65, 0)
+
+        countdown_text = str(int(np.ceil(time_remaining)))
+        text_size = cv2.getTextSize(
+            countdown_text,
+            cv2.FONT_HERSHEY_SIMPLEX,
+            3.0,
+            8,
+        )[0]
+        text_origin = (
+            center[0] - text_size[0] // 2,
+            center[1] + text_size[1] // 2,
+        )
+        cv2.putText(
+            overlay,
+            countdown_text,
+            text_origin,
+            cv2.FONT_HERSHEY_SIMPLEX,
+            3.0,
+            (0, 0, 0),
+            8,
+            cv2.LINE_AA,
+        )
+        cv2.putText(
+            overlay,
+            "HOLD CUBE STILL",
+            (center[0] - 190, center[1] + 125),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.9,
+            (0, 255, 255),
+            3,
+            cv2.LINE_AA,
+        )
+    else:
+        cv2.rectangle(overlay, (0, 0), (width, height), (0, 255, 0), -1)
+        overlay = cv2.addWeighted(preview, 0.40, overlay, 0.60, 0)
+        capture_text = "CAPTURED!"
+        text_size = cv2.getTextSize(
+            capture_text,
+            cv2.FONT_HERSHEY_SIMPLEX,
+            2.0,
+            6,
+        )[0]
+        cv2.putText(
+            overlay,
+            capture_text,
+            (
+                center[0] - text_size[0] // 2,
+                center[1] + text_size[1] // 2,
+            ),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            2.0,
+            (255, 255, 255),
+            6,
+            cv2.LINE_AA,
+        )
+    return overlay
+
+
 def save_cube_capture(run_dir, capture_index, images, camera_ids):
     capture_dir = run_dir / f"capture_{capture_index:03d}"
     capture_dir.mkdir(parents=True, exist_ok=False)
@@ -253,7 +321,7 @@ def run_cube_camera_group_capture(
         else args.min_cameras
     )
     capture_count = 0
-    last_capture_time = time.monotonic()
+    countdown_start_time = None
     previous_detections_by_camera = None
     camera_label = "+".join(f"CAM{camera_id}" for camera_id in camera_ids)
     window_name = f"AprilTag Cube Extrinsic Capture | {camera_label}"
@@ -270,7 +338,7 @@ def run_cube_camera_group_capture(
     if args.manual:
         print("  SPACE: capture when ready | Q: quit")
     else:
-        print(f"  Auto capture interval: {args.capture_interval:.1f}s | Q: quit")
+        print(f"  Auto countdown: {args.capture_interval:.1f}s | Q: quit")
 
     try:
         while capture_count < args.num_captures:
@@ -298,6 +366,21 @@ def run_cube_camera_group_capture(
                 args.min_pose_change,
             )
             capture_ready = ready and pose_changed
+            should_capture = False
+            time_remaining = None
+            current_time = time.monotonic()
+            if not args.manual:
+                if capture_ready:
+                    if countdown_start_time is None:
+                        countdown_start_time = current_time
+                    elapsed = current_time - countdown_start_time
+                    time_remaining = args.capture_interval - elapsed
+                    if time_remaining <= 0:
+                        time_remaining = 0.0
+                        should_capture = True
+                else:
+                    countdown_start_time = None
+
             key = -1
             if not args.no_gui:
                 preview = build_cube_preview(
@@ -319,6 +402,14 @@ def run_cube_camera_group_capture(
                         f"({ready_cameras}/{len(camera_ids)})"
                     )
                     color = (0, 0, 255)
+                if time_remaining is not None:
+                    preview = add_cube_countdown_overlay(
+                        preview,
+                        time_remaining,
+                    )
+                    if time_remaining > 0:
+                        status = f"HOLD STILL - {time_remaining:.1f}s"
+                        color = (0, 255, 255)
                 cv2.putText(
                     preview,
                     status,
@@ -335,14 +426,8 @@ def run_cube_camera_group_capture(
             if key == ord("q"):
                 break
 
-            should_capture = False
             if args.manual:
                 should_capture = key == ord(" ") and capture_ready
-            elif (
-                capture_ready
-                and time.monotonic() - last_capture_time >= args.capture_interval
-            ):
-                should_capture = True
 
             if not should_capture:
                 continue
@@ -354,7 +439,7 @@ def run_cube_camera_group_capture(
                 camera_ids,
             )
             capture_count += 1
-            last_capture_time = time.monotonic()
+            countdown_start_time = None
             previous_detections_by_camera = {
                 camera_id: list(detections)
                 for camera_id, detections in detections_by_camera.items()
@@ -511,7 +596,12 @@ def parse_args():
         help="Two-camera sessions for cube pairwise or legacy ChArUco capture.",
     )
     parser.add_argument("--num-captures", type=int, default=30)
-    parser.add_argument("--capture-interval", type=float, default=1.0)
+    parser.add_argument(
+        "--capture-interval",
+        type=float,
+        default=1.0,
+        help="Seconds shown in the automatic pre-capture countdown.",
+    )
     parser.add_argument("--manual", action="store_true", help="Use manual SPACE capture instead of auto-capture.")
     parser.add_argument("--squares-x", type=int, default=4)
     parser.add_argument("--squares-y", type=int, default=3)
@@ -525,6 +615,8 @@ def parse_args():
 
     if args.num_captures < 10:
         parser.error("--num-captures must be at least 10.")
+    if args.capture_interval <= 0:
+        parser.error("--capture-interval must be greater than zero.")
     if args.num_cameras < 2:
         parser.error("--num-cameras must be at least 2.")
     if not 2 <= args.min_cameras <= args.num_cameras:
