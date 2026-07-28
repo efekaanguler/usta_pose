@@ -102,6 +102,15 @@ def parse_args():
     parser.add_argument("--ref-camera", type=int, default=1)
     parser.add_argument("--cube-layout", type=Path, default=DEFAULT_CUBE_LAYOUT)
     parser.add_argument("--apriltag-family", type=str, default="tag36h11")
+    parser.add_argument(
+        "--cube-solver",
+        choices=("pairwise", "joint-ba"),
+        default="pairwise",
+        help=(
+            "Fast robust pairwise pose graph, or the optional full joint "
+            "camera/cube bundle adjustment."
+        ),
+    )
     parser.add_argument("--min-decision-margin", type=float, default=20.0)
     parser.add_argument("--max-hamming", type=int, default=0)
     parser.add_argument("--min-tag-edge-px", type=float, default=45.0)
@@ -172,6 +181,7 @@ def run_cube_calibration(args, fixed_intrinsics, master_image_size):
     print_fixed_intrinsics(args.master_intrinsics, fixed_intrinsics)
     print(f"Cube layout:       {args.cube_layout}")
     print(f"Capture directory: {captures_dir}")
+    print(f"Cube solver:       {args.cube_solver}")
     print(f"Output overwrite:  {args.output}")
     print("\nSTAGE 1: detecting known cube corners and initializing PnP poses.")
     observations = calibrator.load_capture_directory(captures_dir)
@@ -187,8 +197,12 @@ def run_cube_calibration(args, fixed_intrinsics, master_image_size):
         for camera_id in cube_intrinsics
     }
     print(f"  Accepted observations: {len(observations)} | per camera: {per_camera}")
-    print("\nSTAGE 2: robust joint camera/cube bundle adjustment.")
-    result = calibrator.calibrate()
+    if args.cube_solver == "pairwise":
+        print("\nSTAGE 2: robust pairwise transforms and camera pose graph.")
+        result = calibrator.calibrate_pairwise_pose_graph()
+    else:
+        print("\nSTAGE 2: full joint camera/cube bundle adjustment.")
+        result = calibrator.calibrate_joint_bundle_adjustment()
     save_cube_calibration(args.output, cube_intrinsics, result)
 
     print(f"  Optimizer: {result.optimizer_message}")

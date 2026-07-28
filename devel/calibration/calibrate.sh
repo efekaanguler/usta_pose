@@ -39,6 +39,7 @@ ARUCO_DICT="4X4_50"
 
 METHOD="cube"
 CUBE_CAPTURE_MODE="pairwise"
+CUBE_SOLVER="pairwise"
 NUM_CAPTURES=30
 CAPTURE_INTERVAL=1.0
 REF_CAMERA=1
@@ -62,6 +63,7 @@ Options:
   --skip-capture             Reuse the current extrinsic capture and calculate
   --manual                   Use manual SPACE capture instead of auto-capture
   --cube-capture-mode MODE   pairwise (default) or all
+  --cube-solver SOLVER       pairwise (default) or joint-ba
   --pairs 1,2 1,3 ...        Override cube/ChArUco camera pairs
   --num-captures N           Accepted captures per pair/session
   --min-cameras N            Cube-visible cameras in all-camera mode
@@ -98,6 +100,15 @@ while [[ $# -gt 0 ]]; do
             ;;
         --cube-capture-mode=*)
             CUBE_CAPTURE_MODE="${1#*=}"
+            shift
+            ;;
+        --cube-solver)
+            shift
+            CUBE_SOLVER="$1"
+            shift
+            ;;
+        --cube-solver=*)
+            CUBE_SOLVER="${1#*=}"
             shift
             ;;
         --pairs)
@@ -175,6 +186,9 @@ fi
 if [[ "${CUBE_CAPTURE_MODE}" != "pairwise" && "${CUBE_CAPTURE_MODE}" != "all" ]]; then
     die "--cube-capture-mode must be pairwise or all"
 fi
+if [[ "${CUBE_SOLVER}" != "pairwise" && "${CUBE_SOLVER}" != "joint-ba" ]]; then
+    die "--cube-solver must be pairwise or joint-ba"
+fi
 
 log "Recordings dir: ${RECORDINGS_DIR}"
 
@@ -243,6 +257,7 @@ python_cmd "${SCRIPT_DIR}/calculate.py" \
     --ref-camera "${REF_CAMERA}" \
     --min-pairs "${MIN_PAIRS}" \
     --cube-layout "${CUBE_LAYOUT}" \
+    --cube-solver "${CUBE_SOLVER}" \
     "${BOARD_ARGS[@]}"
 
 if [[ -f "${OUTPUT_FILE}" ]]; then

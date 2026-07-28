@@ -210,6 +210,7 @@ class CubeCalibrationResult:
     residual_count: int
     rejected_corners: int
     image_size: Tuple[int, int]
+    calibration_method: str = "apriltag_cube_bundle_adjustment"
 
 
 def detect_known_cube_tags(
@@ -698,6 +699,9 @@ class CubeMulticamCalibrator:
 
     def _initial_camera_transforms(self) -> Dict[int, np.ndarray]:
         edges = self._build_pairwise_initialization()
+        return self._camera_transforms_from_edges(edges)
+
+    def _camera_transforms_from_edges(self, edges) -> Dict[int, np.ndarray]:
         adjacency: Dict[int, List[Tuple[int, np.ndarray, float]]] = {
             camera_id: [] for camera_id in self.intrinsics
         }
@@ -982,7 +986,270 @@ class CubeMulticamCalibrator:
             covariances[camera_id] = covariance[start:start + 6, start:start + 6]
         return covariances
 
+    def _pack_camera_parameters(
+        self,
+        camera_transforms: Dict[int, np.ndarray],
+        camera_ids: Sequence[int],
+    ) -> np.ndarray:
+        return np.concatenate([
+            transform_to_vector(camera_transforms[camera_id])
+            for camera_id in camera_ids
+        ])
+
+    def _unpack_camera_parameters(
+        self,
+        parameters: np.ndarray,
+        camera_ids: Sequence[int],
+    ) -> Dict[int, np.ndarray]:
+        camera_transforms = {
+            self.reference_camera: np.eye(4, dtype=np.float64)
+        }
+        for camera_index, camera_id in enumerate(camera_ids):
+            start = camera_index * 6
+            camera_transforms[camera_id] = vector_to_transform(
+                parameters[start:start + 6]
+            )
+        return camera_transforms
+
+    def _pose_graph_residuals(
+        self,
+        parameters: np.ndarray,
+        camera_ids: Sequence[int],
+        edges,
+    ) -> np.ndarray:
+        camera_transforms = self._unpack_camera_parameters(
+            parameters,
+            camera_ids,
+        )
+        residuals = []
+        rotation_scale = math.radians(0.5)
+        translation_scale = 0.005
+        for (source, target), (measured, weight, inlier_count) in edges.items():
+            predicted = (
+                camera_transforms[target]
+                @ invert_transform(camera_transforms[source])
+            )
+            delta = invert_transform(measured) @ predicted
+            confidence = math.sqrt(inlier_count) / math.sqrt(max(weight, 0.05))
+            residuals.extend(
+                confidence
+                * Rotation.from_matrix(delta[:3, :3]).as_rotvec()
+                / rotation_scale
+            )
+            residuals.extend(
+                confidence * delta[:3, 3] / translation_scale
+            )
+        return np.asarray(residuals, dtype=np.float64)
+
+    def _refine_cube_transforms(
+        self,
+        camera_transforms: Dict[int, np.ndarray],
+        cube_transforms: Dict[str, np.ndarray],
+    ) -> Dict[str, np.ndarray]:
+        observations_by_capture: Dict[str, List[CubeObservation]] = {}
+        for observation in self.observations:
+            if int(np.sum(observation.inlier_mask)) >= 4:
+                observations_by_capture.setdefault(
+                    observation.capture_id,
+                    [],
+                ).append(observation)
+
+        refined = {}
+        for capture_id, initial_transform in cube_transforms.items():
+            capture_observations = observations_by_capture.get(capture_id, [])
+            if not capture_observations:
+                refined[capture_id] = initial_transform
+                continue
+
+            def local_residuals(parameters):
+                transform_ref_from_cube = vector_to_transform(parameters)
+                residuals = []
+                for observation in capture_observations:
+                    mask = observation.inlier_mask
+                    transform_camera_from_cube = (
+                        camera_transforms[observation.camera_id]
+                        @ transform_ref_from_cube
+                    )
+                    camera_matrix, distortion, _error = self.intrinsics[
+                        observation.camera_id
+                    ]
+                    projected = project_points(
+                        observation.object_points[mask],
+                        transform_camera_from_cube,
+                        camera_matrix,
+                        distortion,
+                    )
+                    residuals.append(
+                        (projected - observation.image_points[mask]).reshape(-1)
+                    )
+                return np.concatenate(residuals)
+
+            initial_parameters = transform_to_vector(initial_transform)
+            initial_residuals = local_residuals(initial_parameters)
+            initial_cost = 0.5 * float(initial_residuals @ initial_residuals)
+            result = least_squares(
+                local_residuals,
+                initial_parameters,
+                method="trf",
+                loss=self.robust_loss,
+                f_scale=self.robust_scale_px,
+                max_nfev=40,
+                x_scale="jac",
+                verbose=0,
+            )
+            if np.all(np.isfinite(result.x)) and result.cost <= initial_cost:
+                refined[capture_id] = vector_to_transform(result.x)
+            else:
+                refined[capture_id] = initial_transform
+        return refined
+
+    def _build_calibration_result(
+        self,
+        camera_transforms: Dict[int, np.ndarray],
+        cube_transforms: Dict[str, np.ndarray],
+        optimizer_result,
+        camera_ids: Sequence[int],
+        rejected_corners: int,
+        calibration_method: str,
+    ) -> CubeCalibrationResult:
+        errors_by_camera = self._corner_errors(
+            camera_transforms,
+            cube_transforms,
+        )
+        covariances = self._camera_covariances(
+            optimizer_result,
+            camera_ids,
+            self.reference_camera,
+        )
+
+        camera_quality = {}
+        for camera_id, errors in errors_by_camera.items():
+            error_array = np.asarray(errors, dtype=np.float64)
+            if len(error_array) == 0:
+                raise RuntimeError(
+                    f"No final reprojection errors for camera {camera_id}."
+                )
+            observation_count = sum(
+                observation.camera_id == camera_id
+                for observation in self.observations
+            )
+            camera_quality[camera_id] = CameraQuality(
+                camera_id=camera_id,
+                observations=observation_count,
+                corners=len(error_array),
+                median_reprojection_error_px=float(np.median(error_array)),
+                p95_reprojection_error_px=float(np.percentile(error_array, 95)),
+                max_reprojection_error_px=float(np.max(error_array)),
+                covariance_6x6=covariances[camera_id],
+            )
+
+        poor_cameras = [
+            camera_id
+            for camera_id, quality in camera_quality.items()
+            if quality.p95_reprojection_error_px > self.max_final_p95_px
+        ]
+        if poor_cameras:
+            details = ", ".join(
+                f"cam{camera_id}={camera_quality[camera_id].p95_reprojection_error_px:.2f}px"
+                for camera_id in poor_cameras
+            )
+            raise RuntimeError(
+                "Final cube calibration failed the reprojection quality gate; "
+                f"P95 limit={self.max_final_p95_px:.2f}px, {details}."
+            )
+
+        return CubeCalibrationResult(
+            reference_camera=self.reference_camera,
+            camera_transforms=camera_transforms,
+            cube_transforms=cube_transforms,
+            camera_quality=camera_quality,
+            optimizer_success=bool(optimizer_result.success),
+            optimizer_message=str(optimizer_result.message),
+            optimizer_cost=float(optimizer_result.cost),
+            residual_count=len(optimizer_result.fun),
+            rejected_corners=rejected_corners,
+            image_size=self.image_size or (0, 0),
+            calibration_method=calibration_method,
+        )
+
     def calibrate(self) -> CubeCalibrationResult:
+        return self.calibrate_pairwise_pose_graph()
+
+    def calibrate_pairwise_pose_graph(self) -> CubeCalibrationResult:
+        self._validate_observation_graph()
+        edges = self._build_pairwise_initialization()
+        if not edges:
+            raise RuntimeError("No robust pairwise cube transforms were available.")
+
+        print("  Robust pairwise cube transforms:")
+        for (source, target), (_transform, _weight, inlier_count) in sorted(
+            edges.items()
+        ):
+            print(f"    cam{source}->cam{target}: {inlier_count} inlier captures")
+
+        initial_cameras = self._camera_transforms_from_edges(edges)
+        camera_ids = sorted(
+            camera_id for camera_id in self.intrinsics
+            if camera_id != self.reference_camera
+        )
+        initial_parameters = self._pack_camera_parameters(
+            initial_cameras,
+            camera_ids,
+        )
+        print(
+            "  Camera pose graph: optimizing "
+            f"{len(camera_ids)} camera transforms from {len(edges)} pair edges."
+        )
+        pose_graph_result = least_squares(
+            self._pose_graph_residuals,
+            initial_parameters,
+            args=(camera_ids, edges),
+            method="trf",
+            loss="huber",
+            f_scale=1.0,
+            max_nfev=100,
+            x_scale="jac",
+            verbose=0,
+        )
+        if not pose_graph_result.success:
+            raise RuntimeError(
+                "Pairwise camera pose graph did not converge: "
+                f"{pose_graph_result.message}; "
+                f"nfev={pose_graph_result.nfev}, "
+                f"cost={pose_graph_result.cost:.6g}."
+            )
+
+        camera_transforms = self._unpack_camera_parameters(
+            pose_graph_result.x,
+            camera_ids,
+        )
+        cube_transforms = self._initial_cube_transforms(camera_transforms)
+        print(
+            "  Local cube refinement: "
+            f"{len(cube_transforms)} independent 6D poses."
+        )
+        cube_transforms = self._refine_cube_transforms(
+            camera_transforms,
+            cube_transforms,
+        )
+        rejected_corners = self._reject_corner_outliers(
+            camera_transforms,
+            cube_transforms,
+        )
+        cube_transforms = self._refine_cube_transforms(
+            camera_transforms,
+            cube_transforms,
+        )
+        return self._build_calibration_result(
+            camera_transforms,
+            cube_transforms,
+            pose_graph_result,
+            camera_ids,
+            rejected_corners,
+            "apriltag_cube_pairwise_pose_graph",
+        )
+
+    def calibrate_joint_bundle_adjustment(self) -> CubeCalibrationResult:
         self._validate_observation_graph()
         initial_cameras = self._initial_camera_transforms()
         initial_cubes = self._initial_cube_transforms(initial_cameras)
@@ -1108,7 +1375,7 @@ def save_cube_calibration(
         "ref_camera": np.asarray(result.reference_camera, dtype=np.int32),
         "num_cameras": np.asarray(len(intrinsics), dtype=np.int32),
         "image_size": np.asarray(result.image_size, dtype=np.int32),
-        "calibration_method": np.asarray("apriltag_cube_bundle_adjustment"),
+        "calibration_method": np.asarray(result.calibration_method),
         "transform_convention": np.asarray(
             "T_ref_to_camN maps reference-camera coordinates into camera N"
         ),
