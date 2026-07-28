@@ -260,9 +260,14 @@ class CalibrationChecker:
                 K[cam_id] = np.asarray(data[f"K{cam_id}"], dtype=np.float64)
                 dist[cam_id] = cls._distortion_from_npz(data, cam_id)
 
+                explicit_key = f"T_ref_to_cam{cam_id}"
                 r_key = f"R_{cam_id}_to_ref"
                 t_key = f"t_{cam_id}_to_ref"
-                if r_key in data and t_key in data:
+                if explicit_key in data:
+                    T_ref_to_cam[cam_id] = np.asarray(
+                        data[explicit_key], dtype=np.float64
+                    ).reshape(4, 4)
+                elif r_key in data and t_key in data:
                     T_ref_to_cam[cam_id] = make_transform(data[r_key], data[t_key])
                 else:
                     T_ref_to_cam[cam_id] = np.eye(4, dtype=np.float64)

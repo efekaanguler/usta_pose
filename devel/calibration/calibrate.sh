@@ -8,9 +8,11 @@
 #
 #      ../record/recordings/calib_data/master_intrinsics.npz
 #
-#  Daily flow:
-#      1. record_extrinsic.py captures synchronized stereo ChArUco pairs
-#      2. calculate.py combines those captures with fixed master intrinsics
+#  Daily default flow:
+#      1. record_extrinsic.py captures all four cameras around the known cube
+#      2. calculate.py jointly optimizes cameras and cube poses
+#
+#  The legacy pairwise ChArUco flow remains available with --method charuco.
 #
 #  Final output is always overwritten at:
 #      ../record/recordings/multicam_calibration.npz
@@ -27,6 +29,7 @@ EXTRINSIC_DIR="${CALIB_DIR}/extrinsic"
 MASTER_INTRINSICS="${CALIB_DIR}/master_intrinsics.npz"
 OUTPUT_FILE="${RECORDINGS_DIR}/multicam_calibration.npz"
 CAM_CONFIG="${RECORD_DIR}/camera_config.json"
+CUBE_LAYOUT="${RECORD_DIR}/apriltag_cube_layout.json"
 
 SQUARES_X=4
 SQUARES_Y=3
@@ -34,10 +37,12 @@ SQUARE_LENGTH=0.063
 MARKER_LENGTH=0.047
 ARUCO_DICT="4X4_50"
 
-NUM_CAPTURES=20
+METHOD="cube"
+NUM_CAPTURES=30
 CAPTURE_INTERVAL=4.0
 REF_CAMERA=1
 MIN_PAIRS=5
+MIN_CAMERAS=4
 MANUAL=false
 SKIP_CAPTURE=false
 PAIRS=()
@@ -52,10 +57,12 @@ usage() {
     cat <<EOF
 
 Options:
-  --skip-capture             Use latest extrinsic run and only calculate
+  --method cube|charuco      Daily extrinsic method
+  --skip-capture             Reuse the current extrinsic capture and calculate
   --manual                   Use manual SPACE capture instead of auto-capture
-  --pairs 1,2 1,3 ...        Override daily camera-pair sessions
-  --num-captures N           Captures per camera pair
+  --pairs 1,2 1,3 ...        Override legacy ChArUco camera pairs
+  --num-captures N           Number of accepted captures
+  --min-cameras N            Cameras that must see the cube per capture
   --capture-interval SEC     Auto-capture interval hint
   --ref-camera N             Reference camera, 1-indexed
   --min-pairs N              Minimum shared captures for stereo calibration
@@ -65,6 +72,15 @@ EOF
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --method)
+            shift
+            METHOD="$1"
+            shift
+            ;;
+        --method=*)
+            METHOD="${1#*=}"
+            shift
+            ;;
         --skip-capture)
             SKIP_CAPTURE=true
             shift
@@ -117,6 +133,15 @@ while [[ $# -gt 0 ]]; do
             MIN_PAIRS="${1#*=}"
             shift
             ;;
+        --min-cameras)
+            shift
+            MIN_CAMERAS="$1"
+            shift
+            ;;
+        --min-cameras=*)
+            MIN_CAMERAS="${1#*=}"
+            shift
+            ;;
         -h|--help)
             usage
             exit 0
@@ -133,6 +158,10 @@ python_cmd() {
 
 mkdir -p "${CALIB_DIR}" "${EXTRINSIC_DIR}" "${RECORDINGS_DIR}"
 
+if [[ "${METHOD}" != "cube" && "${METHOD}" != "charuco" ]]; then
+    die "--method must be cube or charuco"
+fi
+
 log "Recordings dir: ${RECORDINGS_DIR}"
 
 if [[ ! -f "${MASTER_INTRINSICS}" ]]; then
@@ -141,6 +170,12 @@ fi
 
 if [[ ! -f "${CAM_CONFIG}" ]]; then
     die "Missing camera config: ${CAM_CONFIG}"
+fi
+
+if [[ "${METHOD}" == "cube" ]]; then
+    [[ -f "${CUBE_LAYOUT}" ]] || die "Missing cube layout: ${CUBE_LAYOUT}"
+    python3 -c "import scipy" >/dev/null 2>&1 || \
+        die "Cube calibration requires scipy in the active python3 environment"
 fi
 
 BOARD_ARGS=(
@@ -155,33 +190,44 @@ if [[ "${SKIP_CAPTURE}" == false ]]; then
     log "Step 1/2: capturing daily extrinsics only"
     RECORD_ARGS=(
         "${SCRIPT_DIR}/record_extrinsic.py"
+        --method "${METHOD}"
         --cam-config "${CAM_CONFIG}"
         --output-dir "${EXTRINSIC_DIR}"
         --num-captures "${NUM_CAPTURES}"
         --capture-interval "${CAPTURE_INTERVAL}"
-        "${BOARD_ARGS[@]}"
     )
+    if [[ "${METHOD}" == "cube" ]]; then
+        RECORD_ARGS+=(
+            --cube-layout "${CUBE_LAYOUT}"
+            --num-cameras 4
+            --min-cameras "${MIN_CAMERAS}"
+        )
+    else
+        RECORD_ARGS+=("${BOARD_ARGS[@]}")
+    fi
     if [[ "${MANUAL}" == true ]]; then
         RECORD_ARGS+=(--manual)
     fi
-    if [[ ${#PAIRS[@]} -gt 0 ]]; then
+    if [[ "${METHOD}" == "charuco" && ${#PAIRS[@]} -gt 0 ]]; then
         RECORD_ARGS+=(--pairs "${PAIRS[@]}")
     fi
 
     python_cmd "${RECORD_ARGS[@]}"
     ok "Extrinsic capture completed"
 else
-    warn "Extrinsic capture skipped; using the latest recorded extrinsic run"
+    warn "Extrinsic capture skipped; using the current recorded extrinsic data"
 fi
 
 log "Step 2/2: calculating multicam calibration with fixed intrinsics"
 python_cmd "${SCRIPT_DIR}/calculate.py" \
+    --method "${METHOD}" \
     --master-intrinsics "${MASTER_INTRINSICS}" \
     --extrinsic-dir "${EXTRINSIC_DIR}" \
     --output "${OUTPUT_FILE}" \
     --num-cameras 4 \
     --ref-camera "${REF_CAMERA}" \
     --min-pairs "${MIN_PAIRS}" \
+    --cube-layout "${CUBE_LAYOUT}" \
     "${BOARD_ARGS[@]}"
 
 if [[ -f "${OUTPUT_FILE}" ]]; then
@@ -195,6 +241,8 @@ if [[ -f "${OUTPUT_FILE}" ]]; then
     echo "    K1..K4, dist1..dist4"
     echo "    R_1_to_ref..R_4_to_ref"
     echo "    t_1_to_ref..t_4_to_ref"
+    echo "    T_ref_to_cam1..T_ref_to_cam4"
+    echo "    T_cam1_to_ref..T_cam4_to_ref"
 else
     die "Output file was not created: ${OUTPUT_FILE}"
 fi
