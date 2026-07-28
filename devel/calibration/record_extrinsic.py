@@ -15,6 +15,7 @@ This script deliberately does not calculate intrinsics.
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -44,6 +45,7 @@ DEFAULT_CUBE_LAYOUT = (
 )
 
 DEFAULT_PAIRS = ["1,2", "1,3", "2,4", "2,3", "1,4"]
+_NATIVE_RESOURCES = []
 
 
 def setup_realsense_cameras(args, camera_ids):
@@ -529,6 +531,7 @@ def run_cube_capture(args):
 
     cube_layout = load_cube_layout(args.cube_layout)
     detector = create_apriltag_detector(args.apriltag_family)
+    _NATIVE_RESOURCES.append(detector)
     run_dir = args.output_dir / "current"
     if run_dir.exists():
         shutil.rmtree(run_dir)
@@ -716,7 +719,9 @@ def main():
 
     if args.method == "cube":
         run_cube_capture(args)
-        return
+        sys.stdout.flush()
+        sys.stderr.flush()
+        os._exit(0)
 
     run_dir = args.output_dir / "current"
     if run_dir.exists():
