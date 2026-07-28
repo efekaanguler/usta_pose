@@ -18,7 +18,15 @@ DEFAULT_CALIB_DIR = RECORDINGS_DIR / "calib_data"
 DEFAULT_MASTER_INTRINSICS = DEFAULT_CALIB_DIR / "master_intrinsics.npz"
 DEFAULT_EXTRINSIC_DIR = DEFAULT_CALIB_DIR / "extrinsic"
 DEFAULT_OUTPUT = RECORDINGS_DIR / "multicam_calibration.npz"
-DEFAULT_CUBE_LAYOUT = RECORD_DIR / "apriltag_cube_layout.json"
+DEFAULT_IDEAL_CUBE_LAYOUT = RECORD_DIR / "apriltag_cube_layout.json"
+DEFAULT_CALIBRATED_CUBE_LAYOUT = (
+    RECORD_DIR / "apriltag_cube_layout_calibrated.json"
+)
+DEFAULT_CUBE_LAYOUT = (
+    DEFAULT_CALIBRATED_CUBE_LAYOUT
+    if DEFAULT_CALIBRATED_CUBE_LAYOUT.exists()
+    else DEFAULT_IDEAL_CUBE_LAYOUT
+)
 
 
 def load_master_intrinsics(path, num_cameras):

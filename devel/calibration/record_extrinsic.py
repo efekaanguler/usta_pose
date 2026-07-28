@@ -33,7 +33,15 @@ RECORDINGS_DIR = RECORD_DIR / "recordings"
 DEFAULT_CALIB_DIR = RECORDINGS_DIR / "calib_data"
 DEFAULT_EXTRINSIC_DIR = DEFAULT_CALIB_DIR / "extrinsic"
 DEFAULT_CAM_CONFIG = RECORD_DIR / "camera_config.json"
-DEFAULT_CUBE_LAYOUT = RECORD_DIR / "apriltag_cube_layout.json"
+DEFAULT_IDEAL_CUBE_LAYOUT = RECORD_DIR / "apriltag_cube_layout.json"
+DEFAULT_CALIBRATED_CUBE_LAYOUT = (
+    RECORD_DIR / "apriltag_cube_layout_calibrated.json"
+)
+DEFAULT_CUBE_LAYOUT = (
+    DEFAULT_CALIBRATED_CUBE_LAYOUT
+    if DEFAULT_CALIBRATED_CUBE_LAYOUT.exists()
+    else DEFAULT_IDEAL_CUBE_LAYOUT
+)
 
 DEFAULT_PAIRS = ["1,2", "1,3", "2,4", "2,3", "1,4"]
 

@@ -29,7 +29,13 @@ EXTRINSIC_DIR="${CALIB_DIR}/extrinsic"
 MASTER_INTRINSICS="${CALIB_DIR}/master_intrinsics.npz"
 OUTPUT_FILE="${RECORDINGS_DIR}/multicam_calibration.npz"
 CAM_CONFIG="${RECORD_DIR}/camera_config.json"
-CUBE_LAYOUT="${RECORD_DIR}/apriltag_cube_layout.json"
+IDEAL_CUBE_LAYOUT="${RECORD_DIR}/apriltag_cube_layout.json"
+CALIBRATED_CUBE_LAYOUT="${RECORD_DIR}/apriltag_cube_layout_calibrated.json"
+if [[ -f "${CALIBRATED_CUBE_LAYOUT}" ]]; then
+    CUBE_LAYOUT="${CALIBRATED_CUBE_LAYOUT}"
+else
+    CUBE_LAYOUT="${IDEAL_CUBE_LAYOUT}"
+fi
 
 SQUARES_X=4
 SQUARES_Y=3
