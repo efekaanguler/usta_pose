@@ -532,6 +532,7 @@ class CubeMulticamCalibrator:
         self.max_final_p95_px = float(max_final_p95_px)
         self.observations: List[CubeObservation] = []
         self.image_size: Optional[Tuple[int, int]] = None
+        self.pair_p95_px: Dict[Tuple[int, int], float] = {}
 
     def load_capture_directory(self, captures_dir: Path) -> List[CubeObservation]:
         captures_dir = Path(captures_dir)
@@ -614,7 +615,35 @@ class CubeMulticamCalibrator:
 
         self.observations = observations
         self._validate_observation_graph()
+        self._print_initial_observation_diagnostics()
         return observations
+
+    def _print_initial_observation_diagnostics(self) -> None:
+        print("  Initial single-camera PnP diagnostics:")
+        for camera_id in sorted(self.intrinsics):
+            camera_observations = [
+                observation
+                for observation in self.observations
+                if observation.camera_id == camera_id
+            ]
+            errors = np.asarray([
+                observation.initial_reprojection_error_px
+                for observation in camera_observations
+            ], dtype=np.float64)
+            tag_counts: Dict[int, int] = {}
+            for observation in camera_observations:
+                for tag_id in observation.tag_ids:
+                    tag_counts[tag_id] = tag_counts.get(tag_id, 0) + 1
+            tag_summary = ", ".join(
+                f"id{tag_id}:{count}"
+                for tag_id, count in sorted(tag_counts.items())
+            )
+            print(
+                f"    cam{camera_id}: views={len(camera_observations)}, "
+                f"median_mean={np.median(errors):.3f}px, "
+                f"P95_mean={np.percentile(errors, 95):.3f}px, "
+                f"tags=[{tag_summary}]"
+            )
 
     def _validate_observation_graph(self) -> None:
         if not self.observations:
@@ -689,13 +718,142 @@ class CubeMulticamCalibrator:
             inlier_count = int(np.sum(inliers))
             if inlier_count < 2:
                 continue
+            refined, pair_p95_px = self._refine_pair_transform(
+                pair[0],
+                pair[1],
+                average,
+            )
             weight = (
                 rotation_spread
                 + translation_spread * 50.0
+                + pair_p95_px * 0.1
                 + 1.0 / max(inlier_count, 1)
             )
-            edges[pair] = (average, weight, inlier_count)
+            edges[pair] = (refined, weight, inlier_count)
+            self.pair_p95_px[pair] = pair_p95_px
+            print(
+                f"    cam{pair[0]}->cam{pair[1]} consistency: "
+                f"rot_median={rotation_spread:.3f}deg, "
+                f"trans_median={translation_spread * 1000.0:.1f}mm, "
+                f"pair_P95={pair_p95_px:.3f}px"
+            )
         return edges
+
+    def _refine_pair_transform(
+        self,
+        source_camera: int,
+        target_camera: int,
+        initial_target_from_source: np.ndarray,
+    ) -> Tuple[np.ndarray, float]:
+        observations_by_capture: Dict[str, Dict[int, CubeObservation]] = {}
+        for observation in self.observations:
+            if observation.camera_id not in (source_camera, target_camera):
+                continue
+            observations_by_capture.setdefault(observation.capture_id, {})[
+                observation.camera_id
+            ] = observation
+
+        paired = {
+            capture_id: camera_observations
+            for capture_id, camera_observations in observations_by_capture.items()
+            if source_camera in camera_observations
+            and target_camera in camera_observations
+        }
+        if len(paired) < 2:
+            return initial_target_from_source, float("inf")
+
+        capture_ids = sorted(paired)
+        initial_parameters = [transform_to_vector(initial_target_from_source)]
+        initial_parameters.extend(
+            transform_to_vector(
+                paired[capture_id][source_camera].initial_transform
+            )
+            for capture_id in capture_ids
+        )
+        initial_parameters = np.concatenate(initial_parameters)
+
+        def unpack(parameters: np.ndarray):
+            target_from_source = vector_to_transform(parameters[:6])
+            source_from_cube = {
+                capture_id: vector_to_transform(
+                    parameters[6 + capture_index * 6:12 + capture_index * 6]
+                )
+                for capture_index, capture_id in enumerate(capture_ids)
+            }
+            return target_from_source, source_from_cube
+
+        def residuals(parameters: np.ndarray) -> np.ndarray:
+            target_from_source, source_from_cube = unpack(parameters)
+            residual_blocks = []
+            for capture_id in capture_ids:
+                source_pose = source_from_cube[capture_id]
+                transforms = {
+                    source_camera: source_pose,
+                    target_camera: target_from_source @ source_pose,
+                }
+                for camera_id in (source_camera, target_camera):
+                    observation = paired[capture_id][camera_id]
+                    mask = observation.inlier_mask
+                    camera_matrix, distortion, _error = self.intrinsics[
+                        camera_id
+                    ]
+                    projected = project_points(
+                        observation.object_points[mask],
+                        transforms[camera_id],
+                        camera_matrix,
+                        distortion,
+                    )
+                    residual_blocks.append(
+                        (projected - observation.image_points[mask]).reshape(-1)
+                    )
+            return np.concatenate(residual_blocks)
+
+        residual_count = 2 * sum(
+            len(camera_observations[camera_id].object_points)
+            for camera_observations in paired.values()
+            for camera_id in (source_camera, target_camera)
+        )
+        parameter_count = 6 + len(capture_ids) * 6
+        sparsity = lil_matrix(
+            (residual_count, parameter_count),
+            dtype=np.int8,
+        )
+        row_offset = 0
+        for capture_index, capture_id in enumerate(capture_ids):
+            cube_column = 6 + capture_index * 6
+            for camera_id in (source_camera, target_camera):
+                corner_count = len(paired[capture_id][camera_id].object_points)
+                row_end = row_offset + corner_count * 2
+                if camera_id == target_camera:
+                    sparsity[row_offset:row_end, 0:6] = 1
+                sparsity[
+                    row_offset:row_end,
+                    cube_column:cube_column + 6,
+                ] = 1
+                row_offset = row_end
+
+        initial_residuals = residuals(initial_parameters)
+        initial_cost = 0.5 * float(initial_residuals @ initial_residuals)
+        result = least_squares(
+            residuals,
+            initial_parameters,
+            method="trf",
+            jac_sparsity=sparsity.tocsr(),
+            loss=self.robust_loss,
+            f_scale=self.robust_scale_px,
+            max_nfev=120,
+            x_scale="jac",
+            verbose=0,
+        )
+        if not np.all(np.isfinite(result.x)) or result.cost > initial_cost:
+            final_parameters = initial_parameters
+        else:
+            final_parameters = result.x
+
+        refined_transform, _source_from_cube = unpack(final_parameters)
+        final_errors = np.abs(residuals(final_parameters).reshape(-1, 2))
+        final_corner_errors = np.linalg.norm(final_errors, axis=1)
+        return refined_transform, float(np.percentile(final_corner_errors, 95))
 
     def _initial_camera_transforms(self) -> Dict[int, np.ndarray]:
         edges = self._build_pairwise_initialization()
@@ -1143,6 +1301,16 @@ class CubeMulticamCalibrator:
                 covariance_6x6=covariances[camera_id],
             )
 
+        print("  Final reprojection diagnostics:")
+        for camera_id in sorted(camera_quality):
+            quality = camera_quality[camera_id]
+            print(
+                f"    cam{camera_id}: views={quality.observations}, "
+                f"median={quality.median_reprojection_error_px:.3f}px, "
+                f"P95={quality.p95_reprojection_error_px:.3f}px, "
+                f"max={quality.max_reprojection_error_px:.3f}px"
+            )
+
         poor_cameras = [
             camera_id
             for camera_id, quality in camera_quality.items()
@@ -1153,9 +1321,17 @@ class CubeMulticamCalibrator:
                 f"cam{camera_id}={camera_quality[camera_id].p95_reprojection_error_px:.2f}px"
                 for camera_id in poor_cameras
             )
+            pair_details = ", ".join(
+                f"cam{source}-cam{target}={p95:.2f}px"
+                for (source, target), p95 in sorted(self.pair_p95_px.items())
+            )
             raise RuntimeError(
                 "Final cube calibration failed the reprojection quality gate; "
-                f"P95 limit={self.max_final_p95_px:.2f}px, {details}."
+                f"P95 limit={self.max_final_p95_px:.2f}px, {details}. "
+                f"Pair fits: [{pair_details}]. If initial single-camera PnP "
+                "errors are low but pair fits remain high, verify the physical "
+                "cube model: detected black tag-square size, tag centering, "
+                "face orientation, cube edge length, and face flatness."
             )
 
         return CubeCalibrationResult(

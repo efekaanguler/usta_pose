@@ -304,6 +304,41 @@ def cube_pose_changed(
     return float(np.median(camera_changes)) >= min_normalized_change
 
 
+def cube_pose_stable(
+    detections_by_camera,
+    previous_detections_by_camera,
+    images_by_camera,
+    max_normalized_change,
+):
+    if previous_detections_by_camera is None:
+        return False
+
+    camera_changes = []
+    for camera_id, detections in detections_by_camera.items():
+        previous = {
+            detection.tag_id: detection
+            for detection in previous_detections_by_camera.get(camera_id, [])
+        }
+        current = {detection.tag_id: detection for detection in detections}
+        if not current or set(previous) != set(current):
+            return False
+
+        image = images_by_camera[camera_id]
+        diagonal = float(np.hypot(image.shape[1], image.shape[0]))
+        corner_changes = [
+            np.mean(np.linalg.norm(
+                current[tag_id].corners - previous[tag_id].corners,
+                axis=1,
+            )) / diagonal
+            for tag_id in sorted(current)
+        ]
+        camera_changes.append(float(np.max(corner_changes)))
+
+    if not camera_changes:
+        return False
+    return float(np.max(camera_changes)) <= max_normalized_change
+
+
 def run_cube_camera_group_capture(
     args,
     run_dir,
@@ -323,6 +358,7 @@ def run_cube_camera_group_capture(
     capture_count = 0
     countdown_start_time = None
     previous_detections_by_camera = None
+    previous_live_detections_by_camera = None
     camera_label = "+".join(f"CAM{camera_id}" for camera_id in camera_ids)
     window_name = f"AprilTag Cube Extrinsic Capture | {camera_label}"
     if not args.no_gui:
@@ -365,7 +401,17 @@ def run_cube_camera_group_capture(
                 images_by_camera,
                 args.min_pose_change,
             )
-            capture_ready = ready and pose_changed
+            pose_stable = ready and cube_pose_stable(
+                detections_by_camera,
+                previous_live_detections_by_camera,
+                images_by_camera,
+                args.max_stability_change,
+            )
+            previous_live_detections_by_camera = {
+                camera_id: list(detections)
+                for camera_id, detections in detections_by_camera.items()
+            }
+            capture_ready = ready and pose_changed and pose_stable
             should_capture = False
             time_remaining = None
             current_time = time.monotonic()
@@ -394,8 +440,12 @@ def run_cube_camera_group_capture(
                     status = f"READY ({ready_cameras}/{len(camera_ids)})"
                     color = (0, 255, 0)
                 elif ready:
-                    status = "MOVE/ROTATE CUBE TO A NEW POSE"
-                    color = (0, 190, 255)
+                    if not pose_changed:
+                        status = "MOVE/ROTATE CUBE TO A NEW POSE"
+                        color = (0, 190, 255)
+                    else:
+                        status = "HOLD CUBE STILL"
+                        color = (0, 255, 255)
                 else:
                     status = (
                         f"NEED {required_cameras} CAMERAS "
@@ -588,6 +638,15 @@ def parse_args():
         default=0.015,
         help="Minimum median tag-corner displacement as an image-diagonal ratio.",
     )
+    parser.add_argument(
+        "--max-stability-change",
+        type=float,
+        default=0.002,
+        help=(
+            "Maximum frame-to-frame tag-corner displacement as an image-diagonal "
+            "ratio while the automatic countdown is running."
+        ),
+    )
     parser.add_argument("--no-gui", action="store_true")
     parser.add_argument(
         "--pairs",
@@ -617,6 +676,8 @@ def parse_args():
         parser.error("--num-captures must be at least 10.")
     if args.capture_interval <= 0:
         parser.error("--capture-interval must be greater than zero.")
+    if args.max_stability_change <= 0:
+        parser.error("--max-stability-change must be greater than zero.")
     if args.num_cameras < 2:
         parser.error("--num-cameras must be at least 2.")
     if not 2 <= args.min_cameras <= args.num_cameras:
