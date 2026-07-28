@@ -15,6 +15,7 @@ import numpy as np
 
 try:
     from scipy.optimize import least_squares
+    from scipy.sparse import lil_matrix
     from scipy.spatial.transform import Rotation
 except ImportError as exc:
     raise ImportError(
@@ -825,6 +826,45 @@ class CubeMulticamCalibrator:
             raise RuntimeError("No residuals available for cube bundle adjustment.")
         return np.concatenate(residuals)
 
+    def _jacobian_sparsity(
+        self,
+        camera_ids: Sequence[int],
+        capture_ids: Sequence[str],
+    ):
+        camera_columns = {
+            camera_id: camera_index * 6
+            for camera_index, camera_id in enumerate(camera_ids)
+        }
+        cube_column_offset = len(camera_ids) * 6
+        cube_columns = {
+            capture_id: cube_column_offset + capture_index * 6
+            for capture_index, capture_id in enumerate(capture_ids)
+        }
+        residual_count = 2 * sum(
+            int(np.sum(observation.inlier_mask))
+            for observation in self.observations
+            if int(np.sum(observation.inlier_mask)) >= 4
+        )
+        parameter_count = 6 * (len(camera_ids) + len(capture_ids))
+        sparsity = lil_matrix(
+            (residual_count, parameter_count),
+            dtype=np.int8,
+        )
+
+        row_offset = 0
+        for observation in self.observations:
+            corner_count = int(np.sum(observation.inlier_mask))
+            if corner_count < 4:
+                continue
+            row_end = row_offset + corner_count * 2
+            if observation.camera_id != self.reference_camera:
+                camera_column = camera_columns[observation.camera_id]
+                sparsity[row_offset:row_end, camera_column:camera_column + 6] = 1
+            cube_column = cube_columns[observation.capture_id]
+            sparsity[row_offset:row_end, cube_column:cube_column + 6] = 1
+            row_offset = row_end
+        return sparsity.tocsr()
+
     def _corner_errors(
         self,
         camera_transforms: Dict[int, np.ndarray],
@@ -903,12 +943,40 @@ class CubeMulticamCalibrator:
         covariances = {
             reference_camera: np.zeros((6, 6), dtype=np.float64)
         }
-        jacobian = np.asarray(optimizer_result.jac, dtype=np.float64)
+        jacobian = optimizer_result.jac
         degrees_of_freedom = max(jacobian.shape[0] - jacobian.shape[1], 1)
         residual_variance = float(
             2.0 * optimizer_result.cost / degrees_of_freedom
         )
-        covariance = np.linalg.pinv(jacobian.T @ jacobian) * residual_variance
+        camera_parameter_count = len(camera_ids) * 6
+        if camera_parameter_count == 0:
+            return covariances
+
+        camera_jacobian = jacobian[:, :camera_parameter_count]
+        if hasattr(camera_jacobian, "toarray"):
+            camera_jacobian = camera_jacobian.toarray()
+        else:
+            camera_jacobian = np.asarray(camera_jacobian, dtype=np.float64)
+        reduced_hessian = camera_jacobian.T @ camera_jacobian
+
+        cube_parameter_count = jacobian.shape[1] - camera_parameter_count
+        cube_count = cube_parameter_count // 6
+        for cube_index in range(cube_count):
+            start = camera_parameter_count + cube_index * 6
+            cube_jacobian = jacobian[:, start:start + 6]
+            if hasattr(cube_jacobian, "toarray"):
+                cube_jacobian = cube_jacobian.toarray()
+            else:
+                cube_jacobian = np.asarray(cube_jacobian, dtype=np.float64)
+            camera_cube_hessian = camera_jacobian.T @ cube_jacobian
+            cube_hessian = cube_jacobian.T @ cube_jacobian
+            reduced_hessian -= (
+                camera_cube_hessian
+                @ np.linalg.pinv(cube_hessian)
+                @ camera_cube_hessian.T
+            )
+
+        covariance = np.linalg.pinv(reduced_hessian) * residual_variance
         for camera_index, camera_id in enumerate(camera_ids):
             start = camera_index * 6
             covariances[camera_id] = covariance[start:start + 6, start:start + 6]
@@ -929,12 +997,19 @@ class CubeMulticamCalibrator:
             camera_ids,
             capture_ids,
         )
+        initial_sparsity = self._jacobian_sparsity(camera_ids, capture_ids)
 
+        print(
+            "  Bundle adjustment pass 1/2: "
+            f"{len(camera_ids)} camera transforms + "
+            f"{len(capture_ids)} cube poses."
+        )
         first_result = least_squares(
             self._residuals,
             initial_parameters,
             args=(camera_ids, capture_ids),
             method="trf",
+            jac_sparsity=initial_sparsity,
             loss=self.robust_loss,
             f_scale=self.robust_scale_px,
             max_nfev=300,
@@ -947,12 +1022,18 @@ class CubeMulticamCalibrator:
         rejected_corners = self._reject_corner_outliers(
             first_cameras, first_cubes
         )
+        final_sparsity = self._jacobian_sparsity(camera_ids, capture_ids)
 
+        print(
+            "  Bundle adjustment pass 2/2: "
+            f"refining after rejecting {rejected_corners} corner outliers."
+        )
         final_result = least_squares(
             self._residuals,
             first_result.x,
             args=(camera_ids, capture_ids),
             method="trf",
+            jac_sparsity=final_sparsity,
             loss=self.robust_loss,
             f_scale=self.robust_scale_px,
             max_nfev=300,
