@@ -82,14 +82,22 @@ def load_cube_layout(layout_path: Path) -> Dict[int, np.ndarray]:
         if corners.shape != (4, 3):
             raise ValueError(f"Tag {tag_id} corners must have shape 4x3.")
         corners = corners * scale
+        if not np.all(np.isfinite(corners)):
+            raise ValueError(f"Tag {tag_id} contains non-finite corner coordinates.")
         if "normal" in tag:
             expected_normal = np.asarray(tag["normal"], dtype=np.float64)
-            expected_normal /= np.linalg.norm(expected_normal)
+            expected_norm = np.linalg.norm(expected_normal)
+            if not np.isfinite(expected_norm) or expected_norm <= 1e-12:
+                raise ValueError(f"Tag {tag_id} contains an invalid face normal.")
+            expected_normal /= expected_norm
             winding_normal = np.cross(
                 corners[1] - corners[0],
                 corners[2] - corners[0],
             )
-            winding_normal /= np.linalg.norm(winding_normal)
+            winding_norm = np.linalg.norm(winding_normal)
+            if winding_norm <= 1e-12:
+                raise ValueError(f"Tag {tag_id} contains degenerate corners.")
+            winding_normal /= winding_norm
             if float(np.dot(expected_normal, winding_normal)) < 0.95:
                 raise ValueError(
                     f"Tag {tag_id} corner winding disagrees with its face normal."
@@ -106,6 +114,18 @@ def make_transform(rotation: np.ndarray, translation: np.ndarray) -> np.ndarray:
     transform[:3, :3] = np.asarray(rotation, dtype=np.float64).reshape(3, 3)
     transform[:3, 3] = np.asarray(translation, dtype=np.float64).reshape(3)
     return transform
+
+
+def is_valid_rigid_transform(transform: np.ndarray) -> bool:
+    transform = np.asarray(transform, dtype=np.float64)
+    if transform.shape != (4, 4) or not np.all(np.isfinite(transform)):
+        return False
+    rotation = transform[:3, :3]
+    determinant = float(np.linalg.det(rotation))
+    if not np.isfinite(determinant) or determinant <= 0.0:
+        return False
+    orthogonality_error = np.linalg.norm(rotation.T @ rotation - np.eye(3))
+    return bool(abs(determinant - 1.0) < 0.05 and orthogonality_error < 0.05)
 
 
 def invert_transform(transform: np.ndarray) -> np.ndarray:
@@ -212,6 +232,8 @@ def detect_known_cube_tags(
         hamming = int(getattr(detection, "hamming", 0))
         decision_margin = float(getattr(detection, "decision_margin", float("inf")))
         corners = np.asarray(detection.corners, dtype=np.float64).reshape(4, 2)
+        if not np.all(np.isfinite(corners)):
+            continue
         edge_length = tag_edge_length_px(corners)
 
         if hamming > max_hamming:
@@ -238,9 +260,11 @@ def project_points(
     camera_matrix: np.ndarray,
     distortion: np.ndarray,
 ) -> np.ndarray:
-    rotation_vector = Rotation.from_matrix(
+    if not is_valid_rigid_transform(transform_camera_from_object):
+        raise ValueError("Cannot project points with an invalid rigid transform.")
+    rotation_vector, _ = cv2.Rodrigues(
         transform_camera_from_object[:3, :3]
-    ).as_rotvec().reshape(3, 1)
+    )
     translation = transform_camera_from_object[:3, 3].reshape(3, 1)
     projected, _ = cv2.projectPoints(
         np.asarray(object_points, dtype=np.float64),
@@ -276,8 +300,14 @@ def estimate_cube_pose(
 ) -> Tuple[Optional[np.ndarray], float]:
     object_points = np.asarray(object_points, dtype=np.float64).reshape(-1, 3)
     image_points = np.asarray(image_points, dtype=np.float64).reshape(-1, 2)
+    if len(object_points) < 4 or len(object_points) != len(image_points):
+        return None, float("inf")
+    if not np.all(np.isfinite(object_points)) or not np.all(np.isfinite(image_points)):
+        return None, float("inf")
     centered = object_points - object_points.mean(axis=0, keepdims=True)
     singular_values = np.linalg.svd(centered, compute_uv=False)
+    if singular_values[0] <= 1e-12:
+        return None, float("inf")
     planar = singular_values[-1] <= max(singular_values[0] * 1e-5, 1e-9)
     plane_normal = None
     if planar:
@@ -285,7 +315,10 @@ def estimate_cube_pose(
             object_points[1] - object_points[0],
             object_points[2] - object_points[0],
         )
-        plane_normal /= np.linalg.norm(plane_normal)
+        plane_normal_norm = np.linalg.norm(plane_normal)
+        if plane_normal_norm <= 1e-12:
+            return None, float("inf")
+        plane_normal /= plane_normal_norm
     candidates: List[np.ndarray] = []
 
     if planar:
@@ -299,23 +332,35 @@ def estimate_cube_pose(
             )
             if bool(solution[0]):
                 for rotation_vector, translation in zip(solution[1], solution[2]):
+                    if not np.all(np.isfinite(rotation_vector)):
+                        continue
+                    if not np.all(np.isfinite(translation)):
+                        continue
                     rotation, _ = cv2.Rodrigues(rotation_vector)
-                    candidates.append(make_transform(rotation, translation))
+                    candidate = make_transform(rotation, translation)
+                    if is_valid_rigid_transform(candidate):
+                        candidates.append(candidate)
         except cv2.error:
             candidates = []
 
     if not candidates:
         flag = getattr(cv2, "SOLVEPNP_SQPNP", cv2.SOLVEPNP_ITERATIVE)
-        success, rotation_vector, translation = cv2.solvePnP(
-            object_points,
-            image_points,
-            camera_matrix,
-            distortion,
-            flags=flag,
-        )
+        try:
+            success, rotation_vector, translation = cv2.solvePnP(
+                object_points,
+                image_points,
+                camera_matrix,
+                distortion,
+                flags=flag,
+            )
+        except cv2.error:
+            success = False
         if success:
-            rotation, _ = cv2.Rodrigues(rotation_vector)
-            candidates.append(make_transform(rotation, translation))
+            if np.all(np.isfinite(rotation_vector)) and np.all(np.isfinite(translation)):
+                rotation, _ = cv2.Rodrigues(rotation_vector)
+                candidate = make_transform(rotation, translation)
+                if is_valid_rigid_transform(candidate):
+                    candidates.append(candidate)
 
     best_transform = None
     best_error = float("inf")
@@ -359,6 +404,8 @@ def estimate_cube_pose(
         )
         refined_matrix, _ = cv2.Rodrigues(refined_rotation)
         refined_transform = make_transform(refined_matrix, refined_translation)
+        if not is_valid_rigid_transform(refined_transform):
+            return best_transform, best_error
         refined_error = float(np.mean(pose_reprojection_errors(
             object_points,
             image_points,
@@ -381,6 +428,11 @@ def robust_average_transforms(
     max_rotation_deviation_deg: float = 8.0,
     max_translation_deviation_m: float = 0.08,
 ) -> Tuple[np.ndarray, np.ndarray, float, float]:
+    transforms = [
+        np.asarray(transform, dtype=np.float64)
+        for transform in transforms
+        if is_valid_rigid_transform(transform)
+    ]
     if not transforms:
         raise ValueError("Cannot average an empty transform sequence.")
 
@@ -482,11 +534,11 @@ class CubeMulticamCalibrator:
     def load_capture_directory(self, captures_dir: Path) -> List[CubeObservation]:
         captures_dir = Path(captures_dir)
         capture_dirs = sorted(
-            path for path in captures_dir.glob("capture_*") if path.is_dir()
+            path for path in captures_dir.rglob("capture_*") if path.is_dir()
         )
         if not capture_dirs:
             raise FileNotFoundError(
-                f"No capture_* directories found under {captures_dir}."
+                f"No capture_* directories found recursively under {captures_dir}."
             )
 
         observations = []
@@ -536,9 +588,12 @@ class CubeMulticamCalibrator:
                 if initial_error > self.max_initial_reprojection_error_px:
                     continue
 
+                capture_id = str(capture_dir.relative_to(captures_dir)).replace(
+                    "/", "__"
+                )
                 observation = CubeObservation(
                     camera_id=camera_id,
-                    capture_id=capture_dir.name,
+                    capture_id=capture_id,
                     image_path=image_path,
                     object_points=object_points,
                     image_points=image_points,

@@ -2,11 +2,13 @@
 """
 Daily extrinsic-only capture for the 4-camera RealSense rig.
 
-Default method records all four cameras observing the known five-face
-AprilTag cube under:
+Default method records the known five-face AprilTag cube in the legacy
+pairwise camera graph under:
 
     ../record/recordings/calib_data/extrinsic/current/
 
+Each pair is captured separately, so the cube can be moved through a much
+larger useful field of view than an all-four-camera capture would permit.
 The legacy pairwise ChArUco workflow remains available with --method charuco.
 This script deliberately does not calculate intrinsics.
 """
@@ -36,7 +38,7 @@ DEFAULT_CUBE_LAYOUT = RECORD_DIR / "apriltag_cube_layout.json"
 DEFAULT_PAIRS = ["1,2", "1,3", "2,4", "2,3", "1,4"]
 
 
-def setup_realsense_cameras(args):
+def setup_realsense_cameras(args, camera_ids):
     try:
         import pyrealsense2 as rs
     except ImportError as exc:
@@ -48,7 +50,8 @@ def setup_realsense_cameras(args):
     from utils import load_camera_serials
 
     serial_mapping = load_camera_serials(args.cam_config)
-    missing = [camera_id for camera_id in range(1, args.num_cameras + 1)
+    camera_ids = list(camera_ids)
+    missing = [camera_id for camera_id in camera_ids
                if not serial_mapping.get(camera_id)]
     if missing:
         raise RuntimeError(
@@ -68,7 +71,7 @@ def setup_realsense_cameras(args):
     for width, height, fps in stream_configs:
         candidate_pipelines = []
         try:
-            for camera_id in range(1, args.num_cameras + 1):
+            for camera_id in camera_ids:
                 serial = serial_mapping[camera_id]
                 candidate = rs.pipeline()
                 config = rs.config()
@@ -93,10 +96,10 @@ def setup_realsense_cameras(args):
 
     if not pipelines:
         raise RuntimeError(
-            "Could not start all configured cameras with a common color profile."
+            f"Could not start cameras {camera_ids} with a common color profile."
         )
 
-    for camera_id, pipeline in enumerate(pipelines, start=1):
+    for camera_id, pipeline in zip(camera_ids, pipelines):
         serial = serial_mapping[camera_id]
         width, height, fps = actual_stream
         print(
@@ -122,10 +125,15 @@ def capture_color_frames(pipelines):
     return images
 
 
-def build_cube_preview(images, detections_by_camera, capture_count, target_count):
+def build_cube_preview(
+    images,
+    camera_ids,
+    detections_by_camera,
+    capture_count,
+    target_count,
+):
     previews = []
-    for camera_index, image in enumerate(images):
-        camera_id = camera_index + 1
+    for camera_id, image in zip(camera_ids, images):
         if image is None:
             image = np.zeros((360, 640, 3), dtype=np.uint8)
         overlay = image.copy()
@@ -169,18 +177,21 @@ def build_cube_preview(images, detections_by_camera, capture_count, target_count
         )
         previews.append(cv2.resize(overlay, (640, 360)))
 
+    if len(previews) <= 2:
+        return np.hstack(previews)
+
     while len(previews) < 4:
         previews.append(np.zeros((360, 640, 3), dtype=np.uint8))
     return np.vstack([np.hstack(previews[:2]), np.hstack(previews[2:4])])
 
 
-def save_cube_capture(run_dir, capture_index, images):
+def save_cube_capture(run_dir, capture_index, images, camera_ids):
     capture_dir = run_dir / f"capture_{capture_index:03d}"
     capture_dir.mkdir(parents=True, exist_ok=False)
-    for camera_index, image in enumerate(images):
+    for camera_id, image in zip(camera_ids, images):
         if image is None:
             continue
-        image_path = capture_dir / f"camera_{camera_index + 1}.png"
+        image_path = capture_dir / f"camera_{camera_id}.png"
         if not cv2.imwrite(str(image_path), image):
             raise RuntimeError(f"Could not write calibration image: {image_path}")
     return capture_dir
@@ -189,7 +200,7 @@ def save_cube_capture(run_dir, capture_index, images):
 def cube_pose_changed(
     detections_by_camera,
     previous_detections_by_camera,
-    images,
+    images_by_camera,
     min_normalized_change,
 ):
     if previous_detections_by_camera is None:
@@ -209,7 +220,7 @@ def cube_pose_changed(
         common_ids = sorted(set(previous) & set(current))
         if not common_ids:
             continue
-        image = images[camera_id - 1]
+        image = images_by_camera[camera_id]
         diagonal = float(np.hypot(image.shape[1], image.shape[0]))
         corner_changes = [
             np.mean(np.linalg.norm(
@@ -225,36 +236,37 @@ def cube_pose_changed(
     return float(np.median(camera_changes)) >= min_normalized_change
 
 
-def run_cube_capture(args):
-    from cube_calibration import (
-        create_apriltag_detector,
-        detect_known_cube_tags,
-        load_cube_layout,
+def run_cube_camera_group_capture(
+    args,
+    run_dir,
+    camera_ids,
+    detector,
+    cube_layout,
+):
+    from cube_calibration import detect_known_cube_tags
+
+    camera_ids = list(camera_ids)
+    pipelines, actual_stream = setup_realsense_cameras(args, camera_ids)
+    required_cameras = (
+        len(camera_ids)
+        if args.cube_capture_mode == "pairwise"
+        else args.min_cameras
     )
-
-    cube_layout = load_cube_layout(args.cube_layout)
-    detector = create_apriltag_detector(args.apriltag_family)
-    pipelines, actual_stream = setup_realsense_cameras(args)
-    run_dir = args.output_dir / "current"
-    if run_dir.exists():
-        shutil.rmtree(run_dir)
-    run_dir.mkdir(parents=True, exist_ok=True)
-    stale_manifest = args.output_dir / "latest_extrinsic_run.json"
-    stale_manifest.unlink(missing_ok=True)
-
     capture_count = 0
     last_capture_time = time.monotonic()
     previous_detections_by_camera = None
-    window_name = "4-Camera AprilTag Cube Extrinsic Capture"
+    camera_label = "+".join(f"CAM{camera_id}" for camera_id in camera_ids)
+    window_name = f"AprilTag Cube Extrinsic Capture | {camera_label}"
     if not args.no_gui:
         cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
 
-    print("\n[record_extrinsic] AprilTag cube mode")
+    print(f"\n[record_extrinsic] AprilTag cube session: {camera_label}")
     print(f"  Cube layout: {args.cube_layout}")
     print(f"  Accepted capture target: {args.num_captures}")
-    print(f"  Minimum cameras per capture: {args.min_cameras}")
+    print(f"  Cameras required per capture: {required_cameras}")
     print("  Keep the cube's untagged face on the table.")
-    print("  Keep the cube still while a capture is taken.")
+    print("  Move and rotate the cube between captures; keep it still at capture time.")
+    print("  The two cameras may observe different tagged faces of the same cube.")
     if args.manual:
         print("  SPACE: capture when ready | Q: quit")
     else:
@@ -263,11 +275,11 @@ def run_cube_capture(args):
     try:
         while capture_count < args.num_captures:
             images = capture_color_frames(pipelines)
+            images_by_camera = dict(zip(camera_ids, images))
             detections_by_camera = {}
-            for camera_index, image in enumerate(images):
+            for camera_id, image in images_by_camera.items():
                 if image is None:
                     continue
-                camera_id = camera_index + 1
                 detections_by_camera[camera_id] = detect_known_cube_tags(
                     image,
                     detector,
@@ -278,11 +290,11 @@ def run_cube_capture(args):
                 )
 
             ready_cameras = sum(bool(items) for items in detections_by_camera.values())
-            ready = ready_cameras >= args.min_cameras
+            ready = ready_cameras >= required_cameras
             pose_changed = ready and cube_pose_changed(
                 detections_by_camera,
                 previous_detections_by_camera,
-                images,
+                images_by_camera,
                 args.min_pose_change,
             )
             capture_ready = ready and pose_changed
@@ -290,20 +302,21 @@ def run_cube_capture(args):
             if not args.no_gui:
                 preview = build_cube_preview(
                     images,
+                    camera_ids,
                     detections_by_camera,
                     capture_count,
                     args.num_captures,
                 )
                 if capture_ready:
-                    status = f"READY ({ready_cameras}/{args.num_cameras})"
+                    status = f"READY ({ready_cameras}/{len(camera_ids)})"
                     color = (0, 255, 0)
                 elif ready:
                     status = "MOVE/ROTATE CUBE TO A NEW POSE"
                     color = (0, 190, 255)
                 else:
                     status = (
-                        f"NEED {args.min_cameras} CAMERAS "
-                        f"({ready_cameras}/{args.num_cameras})"
+                        f"NEED {required_cameras} CAMERAS "
+                        f"({ready_cameras}/{len(camera_ids)})"
                     )
                     color = (0, 0, 255)
                 cv2.putText(
@@ -334,7 +347,12 @@ def run_cube_capture(args):
             if not should_capture:
                 continue
 
-            capture_dir = save_cube_capture(run_dir, capture_count, images)
+            capture_dir = save_cube_capture(
+                run_dir,
+                capture_count,
+                images,
+                camera_ids,
+            )
             capture_count += 1
             last_capture_time = time.monotonic()
             previous_detections_by_camera = {
@@ -358,8 +376,45 @@ def run_cube_capture(args):
             f"Capture stopped at {capture_count}/{args.num_captures}; calibration not run."
         )
 
-    print(f"\n[record_extrinsic] Cube captures ready: {run_dir}")
-    print(f"[record_extrinsic] Stream: {actual_stream}")
+    print(f"\n[record_extrinsic] Cube session ready: {run_dir}")
+    print(f"[record_extrinsic] {camera_label} stream: {actual_stream}")
+    return run_dir
+
+
+def run_cube_capture(args):
+    from cube_calibration import create_apriltag_detector, load_cube_layout
+
+    cube_layout = load_cube_layout(args.cube_layout)
+    detector = create_apriltag_detector(args.apriltag_family)
+    run_dir = args.output_dir / "current"
+    if run_dir.exists():
+        shutil.rmtree(run_dir)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    stale_manifest = args.output_dir / "latest_extrinsic_run.json"
+    stale_manifest.unlink(missing_ok=True)
+
+    if args.cube_capture_mode == "pairwise":
+        for pair in args.pairs:
+            cam_a, cam_b = normalize_pair(pair)
+            session_dir = run_dir / f"session_cam{cam_a}_cam{cam_b}"
+            session_dir.mkdir(parents=True, exist_ok=False)
+            run_cube_camera_group_capture(
+                args,
+                session_dir,
+                (cam_a, cam_b),
+                detector,
+                cube_layout,
+            )
+    else:
+        run_cube_camera_group_capture(
+            args,
+            run_dir,
+            range(1, args.num_cameras + 1),
+            detector,
+            cube_layout,
+        )
+
+    print(f"\n[record_extrinsic] All cube captures ready: {run_dir}")
     return run_dir
 
 
@@ -423,8 +478,22 @@ def parse_args():
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_EXTRINSIC_DIR)
     parser.add_argument("--cube-layout", type=Path, default=DEFAULT_CUBE_LAYOUT)
     parser.add_argument("--apriltag-family", type=str, default="tag36h11")
+    parser.add_argument(
+        "--cube-capture-mode",
+        choices=("pairwise", "all"),
+        default="pairwise",
+        help=(
+            "Capture each legacy camera pair separately, or require a shared "
+            "all-camera cube view."
+        ),
+    )
     parser.add_argument("--num-cameras", type=int, default=4)
-    parser.add_argument("--min-cameras", type=int, default=4)
+    parser.add_argument(
+        "--min-cameras",
+        type=int,
+        default=2,
+        help="Minimum cube-visible cameras in --cube-capture-mode all.",
+    )
     parser.add_argument("--min-decision-margin", type=float, default=20.0)
     parser.add_argument("--max-hamming", type=int, default=0)
     parser.add_argument("--min-tag-edge-px", type=float, default=45.0)
@@ -435,10 +504,14 @@ def parse_args():
         help="Minimum median tag-corner displacement as an image-diagonal ratio.",
     )
     parser.add_argument("--no-gui", action="store_true")
-    parser.add_argument("--pairs", nargs="+", default=DEFAULT_PAIRS,
-                        help="Two-camera sessions to capture, e.g. --pairs 1,2 1,3 2,4")
+    parser.add_argument(
+        "--pairs",
+        nargs="+",
+        default=DEFAULT_PAIRS,
+        help="Two-camera sessions for cube pairwise or legacy ChArUco capture.",
+    )
     parser.add_argument("--num-captures", type=int, default=30)
-    parser.add_argument("--capture-interval", type=float, default=4.0)
+    parser.add_argument("--capture-interval", type=float, default=1.0)
     parser.add_argument("--manual", action="store_true", help="Use manual SPACE capture instead of auto-capture.")
     parser.add_argument("--squares-x", type=int, default=4)
     parser.add_argument("--squares-y", type=int, default=3)
@@ -461,6 +534,13 @@ def parse_args():
             parser.error(f"Cube layout does not exist: {args.cube_layout}")
         if args.manual and args.no_gui:
             parser.error("--manual cannot be combined with --no-gui.")
+        if args.cube_capture_mode == "pairwise":
+            for pair in args.pairs:
+                cam_a, cam_b = normalize_pair(pair)
+                if not 1 <= cam_a <= args.num_cameras:
+                    parser.error(f"Camera {cam_a} in --pairs exceeds --num-cameras.")
+                if not 1 <= cam_b <= args.num_cameras:
+                    parser.error(f"Camera {cam_b} in --pairs exceeds --num-cameras.")
     else:
         if args.square_length <= args.marker_length:
             parser.error("--square-length must be greater than --marker-length.")

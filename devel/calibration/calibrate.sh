@@ -9,7 +9,7 @@
 #      ../record/recordings/calib_data/master_intrinsics.npz
 #
 #  Daily default flow:
-#      1. record_extrinsic.py captures all four cameras around the known cube
+#      1. record_extrinsic.py captures the known cube in legacy camera pairs
 #      2. calculate.py jointly optimizes cameras and cube poses
 #
 #  The legacy pairwise ChArUco flow remains available with --method charuco.
@@ -38,11 +38,12 @@ MARKER_LENGTH=0.047
 ARUCO_DICT="4X4_50"
 
 METHOD="cube"
+CUBE_CAPTURE_MODE="pairwise"
 NUM_CAPTURES=30
-CAPTURE_INTERVAL=4.0
+CAPTURE_INTERVAL=1.0
 REF_CAMERA=1
 MIN_PAIRS=5
-MIN_CAMERAS=4
+MIN_CAMERAS=2
 MANUAL=false
 SKIP_CAPTURE=false
 PAIRS=()
@@ -60,9 +61,10 @@ Options:
   --method cube|charuco      Daily extrinsic method
   --skip-capture             Reuse the current extrinsic capture and calculate
   --manual                   Use manual SPACE capture instead of auto-capture
-  --pairs 1,2 1,3 ...        Override legacy ChArUco camera pairs
-  --num-captures N           Number of accepted captures
-  --min-cameras N            Cameras that must see the cube per capture
+  --cube-capture-mode MODE   pairwise (default) or all
+  --pairs 1,2 1,3 ...        Override cube/ChArUco camera pairs
+  --num-captures N           Accepted captures per pair/session
+  --min-cameras N            Cube-visible cameras in all-camera mode
   --capture-interval SEC     Auto-capture interval hint
   --ref-camera N             Reference camera, 1-indexed
   --min-pairs N              Minimum shared captures for stereo calibration
@@ -87,6 +89,15 @@ while [[ $# -gt 0 ]]; do
             ;;
         --manual)
             MANUAL=true
+            shift
+            ;;
+        --cube-capture-mode)
+            shift
+            CUBE_CAPTURE_MODE="$1"
+            shift
+            ;;
+        --cube-capture-mode=*)
+            CUBE_CAPTURE_MODE="${1#*=}"
             shift
             ;;
         --pairs)
@@ -161,6 +172,9 @@ mkdir -p "${CALIB_DIR}" "${EXTRINSIC_DIR}" "${RECORDINGS_DIR}"
 if [[ "${METHOD}" != "cube" && "${METHOD}" != "charuco" ]]; then
     die "--method must be cube or charuco"
 fi
+if [[ "${CUBE_CAPTURE_MODE}" != "pairwise" && "${CUBE_CAPTURE_MODE}" != "all" ]]; then
+    die "--cube-capture-mode must be pairwise or all"
+fi
 
 log "Recordings dir: ${RECORDINGS_DIR}"
 
@@ -199,6 +213,7 @@ if [[ "${SKIP_CAPTURE}" == false ]]; then
     if [[ "${METHOD}" == "cube" ]]; then
         RECORD_ARGS+=(
             --cube-layout "${CUBE_LAYOUT}"
+            --cube-capture-mode "${CUBE_CAPTURE_MODE}"
             --num-cameras 4
             --min-cameras "${MIN_CAMERAS}"
         )
@@ -208,7 +223,7 @@ if [[ "${SKIP_CAPTURE}" == false ]]; then
     if [[ "${MANUAL}" == true ]]; then
         RECORD_ARGS+=(--manual)
     fi
-    if [[ "${METHOD}" == "charuco" && ${#PAIRS[@]} -gt 0 ]]; then
+    if [[ ${#PAIRS[@]} -gt 0 ]]; then
         RECORD_ARGS+=(--pairs "${PAIRS[@]}")
     fi
 
