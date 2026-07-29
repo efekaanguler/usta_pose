@@ -9,10 +9,11 @@
 #      ../record/recordings/calib_data/master_intrinsics.npz
 #
 #  Daily default flow:
-#      1. record_extrinsic.py captures the known cube in legacy camera pairs
-#      2. calculate.py jointly optimizes cameras and cube poses
+#      1. record_extrinsic.py captures ChArUco observations in camera pairs
+#      2. calculate.py jointly optimizes every camera and board pose
+#      3. felfelfeci3.py validates live depth/PCL agreement without ICP
 #
-#  The legacy pairwise ChArUco flow remains available with --method charuco.
+#  The AprilTag cube flow remains available explicitly with --method cube.
 #
 #  Final output is always overwritten at:
 #      ../record/recordings/multicam_calibration.npz
@@ -43,9 +44,10 @@ SQUARE_LENGTH=0.063
 MARKER_LENGTH=0.047
 ARUCO_DICT="4X4_50"
 
-METHOD="cube"
+METHOD="charuco"
 CUBE_CAPTURE_MODE="pairwise"
 CUBE_SOLVER="pairwise"
+CHARUCO_SOLVER="global-ba"
 NUM_CAPTURES=30
 CAPTURE_INTERVAL=1.0
 REF_CAMERA=1
@@ -53,6 +55,7 @@ MIN_PAIRS=5
 MIN_CAMERAS=2
 MANUAL=false
 SKIP_CAPTURE=false
+SKIP_PCL_CHECK=false
 PAIRS=()
 
 log()  { echo -e "\n\033[1;36m[calibrate.sh]\033[0m $*"; }
@@ -67,9 +70,11 @@ usage() {
 Options:
   --method cube|charuco      Daily extrinsic method
   --skip-capture             Reuse the current extrinsic capture and calculate
+  --skip-pcl-check           Skip final live depth/PCL validation
   --manual                   Use manual SPACE capture instead of auto-capture
   --cube-capture-mode MODE   pairwise (default) or all
   --cube-solver SOLVER       pairwise (default) or joint-ba
+  --charuco-solver SOLVER    global-ba (default) or pairwise legacy comparison
   --pairs 1,2 1,3 ...        Override cube/ChArUco camera pairs
   --num-captures N           Accepted captures per pair/session
   --min-cameras N            Cube-visible cameras in all-camera mode
@@ -95,6 +100,10 @@ while [[ $# -gt 0 ]]; do
             SKIP_CAPTURE=true
             shift
             ;;
+        --skip-pcl-check)
+            SKIP_PCL_CHECK=true
+            shift
+            ;;
         --manual)
             MANUAL=true
             shift
@@ -115,6 +124,15 @@ while [[ $# -gt 0 ]]; do
             ;;
         --cube-solver=*)
             CUBE_SOLVER="${1#*=}"
+            shift
+            ;;
+        --charuco-solver)
+            shift
+            CHARUCO_SOLVER="$1"
+            shift
+            ;;
+        --charuco-solver=*)
+            CHARUCO_SOLVER="${1#*=}"
             shift
             ;;
         --pairs)
@@ -195,6 +213,9 @@ fi
 if [[ "${CUBE_SOLVER}" != "pairwise" && "${CUBE_SOLVER}" != "joint-ba" ]]; then
     die "--cube-solver must be pairwise or joint-ba"
 fi
+if [[ "${CHARUCO_SOLVER}" != "global-ba" && "${CHARUCO_SOLVER}" != "pairwise" ]]; then
+    die "--charuco-solver must be global-ba or pairwise"
+fi
 
 log "Recordings dir: ${RECORDINGS_DIR}"
 
@@ -208,9 +229,9 @@ fi
 
 if [[ "${METHOD}" == "cube" ]]; then
     [[ -f "${CUBE_LAYOUT}" ]] || die "Missing cube layout: ${CUBE_LAYOUT}"
-    python3 -c "import scipy" >/dev/null 2>&1 || \
-        die "Cube calibration requires scipy in the active python3 environment"
 fi
+python3 -c "import scipy" >/dev/null 2>&1 || \
+    die "Robust calibration requires scipy in the active python3 environment"
 
 BOARD_ARGS=(
     --squares-x "${SQUARES_X}"
@@ -220,8 +241,14 @@ BOARD_ARGS=(
     --aruco-dict "${ARUCO_DICT}"
 )
 
+if [[ "${SKIP_PCL_CHECK}" == true ]]; then
+    TOTAL_STEPS=2
+else
+    TOTAL_STEPS=3
+fi
+
 if [[ "${SKIP_CAPTURE}" == false ]]; then
-    log "Step 1/2: capturing daily extrinsics only"
+    log "Step 1/${TOTAL_STEPS}: capturing daily extrinsics only"
     RECORD_ARGS=(
         "${SCRIPT_DIR}/record_extrinsic.py"
         --method "${METHOD}"
@@ -253,7 +280,7 @@ else
     warn "Extrinsic capture skipped; using the current recorded extrinsic data"
 fi
 
-log "Step 2/2: calculating multicam calibration with fixed intrinsics"
+log "Step 2/${TOTAL_STEPS}: calculating multicam calibration with fixed intrinsics"
 python_cmd "${SCRIPT_DIR}/calculate.py" \
     --method "${METHOD}" \
     --master-intrinsics "${MASTER_INTRINSICS}" \
@@ -264,6 +291,7 @@ python_cmd "${SCRIPT_DIR}/calculate.py" \
     --min-pairs "${MIN_PAIRS}" \
     --cube-layout "${CUBE_LAYOUT}" \
     --cube-solver "${CUBE_SOLVER}" \
+    --charuco-solver "${CHARUCO_SOLVER}" \
     "${BOARD_ARGS[@]}"
 
 if [[ -f "${OUTPUT_FILE}" ]]; then
@@ -281,4 +309,22 @@ if [[ -f "${OUTPUT_FILE}" ]]; then
     echo "    T_cam1_to_ref..T_cam4_to_ref"
 else
     die "Output file was not created: ${OUTPUT_FILE}"
+fi
+
+if [[ "${SKIP_PCL_CHECK}" == false ]]; then
+    log "Step 3/3: validating live multi-camera depth/PCL alignment"
+    echo "  Keep people, chairs, and table objects still for about one second."
+    if python_cmd "${RECORD_DIR}/felfelfeci3.py" \
+        --cam-config "${CAM_CONFIG}" \
+        --output-dir "${RECORDINGS_DIR}" \
+        --calib-check-npz "${OUTPUT_FILE}" \
+        --calib-check-method pcl \
+        --pcl-check-only \
+        --no-gui; then
+        ok "Morning PCL alignment validation accepted"
+    else
+        die "Morning PCL alignment validation failed. Calibration was saved for diagnostics but must not be used for recording."
+    fi
+else
+    warn "Final live depth/PCL validation skipped"
 fi

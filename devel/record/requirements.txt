@@ -1,0 +1,6 @@
+numpy
+scipy
+opencv-contrib-python
+imageio-ffmpeg
+pyrealsense2
+PyYAML

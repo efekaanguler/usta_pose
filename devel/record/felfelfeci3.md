@@ -77,15 +77,13 @@ source /home/efekaan/Desktop/torch/torch_env/bin/activate
 Run a recording with the default camera config:
 
 ```bash
-python usta_pose/devel/record/felfelfeci3.py \
-  --output-dir usta_pose/devel/recordings
+python3 usta_pose/devel/record/felfelfeci3.py
 ```
 
 Headless mode:
 
 ```bash
-python usta_pose/devel/record/felfelfeci3.py \
-  --output-dir usta_pose/devel/recordings \
+python3 usta_pose/devel/record/felfelfeci3.py \
   --no-gui
 ```
 
@@ -101,33 +99,100 @@ Common options:
 --no-gui                 Run without OpenCV preview windows
 ```
 
-## Optional AprilTag Cube Calibration Pre-check
+## Default Depth/PCL Calibration Pre-check
 
-Before recording starts, `felfelfeci3.py` can capture one live color frame from
-each camera, estimate the AprilTag cube pose with `solvePnP`, and compare the
-measured camera-to-camera transforms against the morning calibration NPZ.
-
-Run with:
-
-```bash
-python usta_pose/devel/record/felfelfeci3.py \
-  --output-dir usta_pose/devel/record/recordings \
-  --calib-check \
-  --calib-check-layout usta_pose/devel/record/apriltag_cube_layout.json \
-  --calib-check-npz usta_pose/devel/record/recordings/multicam_calibration.npz
-```
-
-Tune thresholds if needed:
+Before recording starts, `felfelfeci3.py` captures five live raw-depth frames
+from every camera. It takes a temporal median, rejects moving pixels and depth
+edges, then projects each camera's measured depth into its paired camera through
+the same transform chain used by `create_session_pcl.py`:
 
 ```text
---calib-check-max-rot-deg 2.0
---calib-check-max-trans-mm 20.0
---calib-check-max-reproj-px 3.0
+source depth
+  -> source color camera
+  -> morning reference frame
+  -> target color camera
+  -> target depth
 ```
 
-The cube layout JSON must contain exact CAD coordinates for each tag's four
-corners in a shared cube coordinate frame. See
-`apriltag_cube_layout.example.json` for the expected schema.
+The checker measures bidirectional median/P75 depth disagreement, inlier ratio,
+and common depth support. It never runs ICP and never changes the calibration.
+`PASS` and a connected-graph `WARN` unlock recording; severe mismatch or a
+disconnected camera blocks it.
+
+Default gates are intentionally operational rather than micron-level: `PASS`
+uses 35 mm median and 65 mm P75 limits; `WARN` extends these to 50 mm and
+100 mm while still requiring a connected camera graph. This allows normal D400
+depth noise and small surface/occlusion effects without accepting the visibly
+separated clouds seen in bad calibrations. RealSense specifies up to 2% depth
+Z error and RMS spatial noise for the relevant D400 family operating range:
+[D400 depth-quality specification](https://support.realsenseai.com/hc/en-us/articles/360059129453-Depth-accuracy-for-Intel-RealSense-D400-Series-Cameras).
+
+Run normally:
+
+```bash
+python3 usta_pose/devel/record/felfelfeci3.py
+```
+
+By default, the script uses:
+
+```text
+output-dir: usta_pose/devel/record/recordings
+calibration: {output-dir}/multicam_calibration.npz
+pre-check: five-frame live depth/PCL consistency
+```
+
+Controls:
+
+```text
+C  capture a short static depth burst and run the PCL check
+R  start recording only after PASS/WARN
+Q  quit
+```
+
+Keep people, chairs, and tabletop objects still for about one second while
+pressing `C`. No point cloud, image, or log file is written by the check.
+
+Run only the live check and exit:
+
+```bash
+python3 usta_pose/devel/record/felfelfeci3.py \
+  --pcl-check-only \
+  --no-gui
+```
+
+Emergency/debug recording without any pre-check:
+
+```bash
+python3 usta_pose/devel/record/felfelfeci3.py --no-calib-check
+```
+
+The AprilTag cube implementation is retained but is no longer the default:
+
+```bash
+python3 -m pip install pupil-apriltags
+python3 usta_pose/devel/record/felfelfeci3.py \
+  --calib-check-method cube
+```
+
+## Morning Calibration
+
+The default daily command keeps ChArUco pairwise capture and fixed master
+intrinsics. After writing `multicam_calibration.npz`, it automatically starts
+the cameras and runs the same PCL check:
+
+```bash
+cd usta_pose/devel/calibration
+./calibrate.sh
+```
+
+Use `--skip-pcl-check` only for offline diagnostics when cameras are not
+connected.
+
+## Python Dependencies
+
+```bash
+python3 -m pip install -r usta_pose/devel/record/requirements.txt
+```
 
 ## Downstream Note
 

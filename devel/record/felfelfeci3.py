@@ -18,6 +18,7 @@ Output structure:
         metadata.json
 
 Controls:
+    C: Validate live multi-camera depth/PCL alignment
     R: Toggle recording on/off
     Q: Quit
     Ctrl+C: Stop and quit (headless/no-gui mode)
@@ -748,8 +749,50 @@ def capture_precheck_color_frames(cameras, timeout_s=5.0):
     return frames, missing
 
 
-def run_calibration_precheck(args, cameras, output_base):
-    """Run AprilTag cube calibration check before allowing recording."""
+def capture_precheck_depth_frames(
+    cameras,
+    frame_count=5,
+    timeout_s=6.0,
+    interval_s=0.04,
+):
+    """Collect a short static depth burst from every running camera."""
+    samples = {
+        cam.cam_idx + 1: []
+        for cam in cameras
+    }
+    deadline = time.time() + float(timeout_s)
+    target_count = max(3, int(frame_count))
+
+    while time.time() < deadline:
+        complete = True
+        for cam in cameras:
+            cam_id = cam.cam_idx + 1
+            if len(samples[cam_id]) >= target_count:
+                continue
+            complete = False
+            result = cam.get_latest_frame()
+            if result is None:
+                continue
+            _color_image, depth_image = result
+            if depth_image is not None:
+                samples[cam_id].append(depth_image.copy())
+
+        if all(len(frames) >= target_count for frames in samples.values()):
+            break
+        if complete:
+            break
+        time.sleep(float(interval_s))
+
+    missing = [
+        camera_id
+        for camera_id, frames in samples.items()
+        if len(frames) < target_count
+    ]
+    return samples, missing
+
+
+def run_cube_calibration_precheck(args, cameras, output_base):
+    """Run the retained AprilTag-cube checker when explicitly requested."""
     from calibration_checker import CalibrationChecker
 
     if not os.path.exists(args.calib_check_layout):
@@ -787,6 +830,63 @@ def run_calibration_precheck(args, cameras, output_base):
     checker.print_report(result)
 
     return result
+
+
+def run_pcl_alignment_precheck(args, cameras, output_base):
+    """Validate live depth alignment without changing the calibration."""
+    from pcl_alignment_checker import PCLAlignmentChecker
+
+    calibration_npz = args.calib_check_npz
+    if calibration_npz is None:
+        calibration_npz = os.path.join(
+            str(output_base), "multicam_calibration.npz"
+        )
+
+    print(
+        f"Capturing {args.pcl_check_frames} static depth frames per camera. "
+        "Keep people, chairs, and table objects still..."
+    )
+    depth_frames, missing = capture_precheck_depth_frames(
+        cameras,
+        frame_count=args.pcl_check_frames,
+        timeout_s=args.calib_check_timeout,
+    )
+    if missing:
+        raise RuntimeError(
+            f"Could not collect a complete depth burst from cameras: {missing}"
+        )
+
+    camera_models = {}
+    for cam in cameras:
+        cam_id = cam.cam_idx + 1
+        if not cam.calibration_data:
+            raise RuntimeError(
+                f"Live stream calibration is unavailable for camera {cam_id}"
+            )
+        camera_models[cam_id] = dict(cam.calibration_data)
+        camera_models[cam_id]["aligned_to_color"] = bool(
+            cam.align_depth_live
+        )
+
+    checker = PCLAlignmentChecker(
+        calibration_npz,
+        sample_step=args.pcl_check_sample_step,
+        pass_median_mm=args.pcl_check_pass_median_mm,
+        pass_p75_mm=args.pcl_check_pass_p75_mm,
+        pass_inlier_ratio=args.pcl_check_pass_inlier_ratio,
+        warn_median_mm=args.pcl_check_warn_median_mm,
+        warn_p75_mm=args.pcl_check_warn_p75_mm,
+        warn_inlier_ratio=args.pcl_check_warn_inlier_ratio,
+    )
+    result = checker.check(depth_frames, camera_models)
+    checker.print_report(result)
+    return result
+
+
+def run_calibration_precheck(args, cameras, output_base):
+    if args.calib_check_method == "cube":
+        return run_cube_calibration_precheck(args, cameras, output_base)
+    return run_pcl_alignment_precheck(args, cameras, output_base)
 
 
 
@@ -829,7 +929,7 @@ def main(args):
     for i in range(num_cameras):
         if serials[i] is None:
             print(f"Error: No serial for camera {i + 1}. Add it to {args.cam_config}")
-            return
+            return 2
 
         cam = CameraThread(
             i,
@@ -855,6 +955,18 @@ def main(args):
 
     time.sleep(1)  # Let threads stabilize
 
+    if args.pcl_check_only:
+        print("\nRunning one PCL alignment check, then exiting...")
+        try:
+            result = run_pcl_alignment_precheck(args, cameras, output_base)
+            return 0 if result.ok else 2
+        except Exception as exc:
+            print(f"\n\033[1;31mPCL alignment check failed: {exc}\033[0m")
+            return 2
+        finally:
+            for cam in cameras:
+                cam.stop()
+
     # Runtime mode
     use_gui = (not args.no_gui) and bool(os.environ.get('DISPLAY'))
 
@@ -873,7 +985,10 @@ def main(args):
 
     def run_precheck_gate():
         nonlocal calib_precheck_ok
-        print("\nRunning AprilTag cube calibration pre-check...")
+        if args.calib_check_method == "cube":
+            print("\nRunning AprilTag cube calibration pre-check...")
+        else:
+            print("\nRunning live depth/PCL alignment pre-check...")
         try:
             precheck_result = run_calibration_precheck(args, cameras, output_base)
         except Exception as exc:
@@ -885,7 +1000,14 @@ def main(args):
         if calib_precheck_ok:
             print("\n\033[1;32mPre-check OK. Press R to start recording.\033[0m")
         else:
-            print("\n\033[1;31mPre-check failed. Adjust cube/cameras and press C again.\033[0m")
+            if args.calib_check_method == "cube":
+                remedy = "Adjust cube/cameras"
+            else:
+                remedy = "Keep the setup still and inspect camera/calibration alignment"
+            print(
+                f"\n\033[1;31mPre-check failed. {remedy}, "
+                "then press C again.\033[0m"
+            )
         return calib_precheck_ok
 
     def start_recording_session():
@@ -1144,6 +1266,7 @@ def main(args):
         if use_gui:
             cv2.destroyAllWindows()
         print("Session ended.")
+    return 0
 
 
 if __name__ == '__main__':
@@ -1177,19 +1300,40 @@ if __name__ == '__main__':
         dest='calib_check',
         action='store_true',
         default=True,
-        help='Run AprilTag cube calibration pre-check before recording can start (default: ON)',
+        help='Require a calibration pre-check before recording can start',
     )
     parser.add_argument(
         '--no-calib-check',
         dest='calib_check',
         action='store_false',
-        help='Skip AprilTag cube calibration pre-check',
+        help='Skip the calibration pre-check',
+    )
+    parser.add_argument(
+        '--calib-check-method',
+        choices=('pcl', 'cube'),
+        default='pcl',
+        help=(
+            'Pre-check method. pcl directly validates live depth-cloud '
+            'alignment; cube retains the legacy AprilTag check.'
+        ),
+    )
+    parser.add_argument(
+        '--pcl-check-only',
+        action='store_true',
+        help=(
+            'Start all cameras, run one live PCL alignment check, and exit '
+            'without creating a recording session'
+        ),
     )
     parser.add_argument(
         '--calib-check-layout',
         type=str,
-        default=os.path.join(script_dir, 'apriltag_cube_layout.json'),
-        help='JSON file with cube AprilTag 3D corner coordinates (default: record/apriltag_cube_layout.json)',
+        default=(
+            os.path.join(script_dir, 'apriltag_cube_layout_calibrated.json')
+            if os.path.exists(os.path.join(script_dir, 'apriltag_cube_layout_calibrated.json'))
+            else os.path.join(script_dir, 'apriltag_cube_layout.json')
+        ),
+        help='JSON file with measured or ideal cube AprilTag 3D corner coordinates',
     )
     parser.add_argument(
         '--calib-check-npz',
@@ -1202,7 +1346,55 @@ if __name__ == '__main__':
     parser.add_argument('--calib-check-ref-camera', type=int, default=1,
                         help='Reference camera for pair checks')
     parser.add_argument('--calib-check-timeout', type=float, default=5.0,
-                        help='Seconds to wait for one pre-check frame from each camera')
+                        help='Seconds to collect pre-check frames from every camera')
+    parser.add_argument(
+        '--pcl-check-frames',
+        type=int,
+        default=5,
+        help='Static depth frames per camera used for temporal median filtering',
+    )
+    parser.add_argument(
+        '--pcl-check-sample-step',
+        type=int,
+        default=6,
+        help='Depth pixel sampling step used by the PCL check',
+    )
+    parser.add_argument(
+        '--pcl-check-pass-median-mm',
+        type=float,
+        default=35.0,
+        help='PASS limit for bidirectional median depth disagreement',
+    )
+    parser.add_argument(
+        '--pcl-check-pass-p75-mm',
+        type=float,
+        default=65.0,
+        help='PASS limit for bidirectional 75th-percentile disagreement',
+    )
+    parser.add_argument(
+        '--pcl-check-pass-inlier-ratio',
+        type=float,
+        default=0.35,
+        help='Minimum PASS fraction within the depth-dependent inlier threshold',
+    )
+    parser.add_argument(
+        '--pcl-check-warn-median-mm',
+        type=float,
+        default=50.0,
+        help='WARN limit for bidirectional median depth disagreement',
+    )
+    parser.add_argument(
+        '--pcl-check-warn-p75-mm',
+        type=float,
+        default=100.0,
+        help='WARN limit for bidirectional 75th-percentile disagreement',
+    )
+    parser.add_argument(
+        '--pcl-check-warn-inlier-ratio',
+        type=float,
+        default=0.20,
+        help='Minimum WARN fraction within the depth-dependent inlier threshold',
+    )
     parser.add_argument('--calib-check-min-tags', type=int, default=1,
                         help='Minimum known cube tags required per camera')
     parser.add_argument('--calib-check-min-points', type=int, default=4,
@@ -1221,4 +1413,4 @@ if __name__ == '__main__':
                         help='Allow pre-check to pass when only a subset of cameras see the cube')
 
     args = parser.parse_args()
-    main(args)
+    raise SystemExit(main(args))
