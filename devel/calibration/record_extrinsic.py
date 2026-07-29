@@ -598,6 +598,7 @@ def run_pair_capture(args, run_dir, pair):
         "--num-captures", str(args.num_captures),
         "--min-cameras", "2",
         "--capture-interval", str(args.capture_interval),
+        "--min-pose-change", str(args.min_pose_change),
         "--width", str(args.width),
         "--height", str(args.height),
         "--fps", str(args.fps),

@@ -38,18 +38,51 @@ def load_master_intrinsics(path, num_cameras):
 
     intrinsics = {}
     with np.load(path) as data:
-        image_size = np.array(data["image_size"], dtype=int) if "image_size" in data else np.array([0, 0])
+        image_size = (
+            np.asarray(data["image_size"], dtype=int).reshape(-1)
+            if "image_size" in data
+            else np.array([0, 0], dtype=int)
+        )
+        if image_size.size != 2:
+            raise ValueError(
+                f"{path} contains invalid image_size shape: {image_size.shape}."
+            )
+        if np.any(image_size < 0) or (
+            np.any(image_size == 0) and not np.all(image_size == 0)
+        ):
+            raise ValueError(
+                f"{path} contains invalid image_size values: {image_size.tolist()}."
+            )
         for cam_num in range(1, num_cameras + 1):
             k_key = f"K{cam_num}"
             d_key = f"dist{cam_num}"
             if k_key not in data or d_key not in data:
                 raise KeyError(f"{path} does not contain {k_key}/{d_key}.")
 
+            camera_matrix = np.asarray(data[k_key], dtype=np.float64)
+            distortion = np.asarray(data[d_key], dtype=np.float64)
+            if camera_matrix.shape != (3, 3):
+                raise ValueError(
+                    f"{path}:{k_key} must be 3x3, got {camera_matrix.shape}."
+                )
+            if not np.all(np.isfinite(camera_matrix)):
+                raise ValueError(f"{path}:{k_key} contains non-finite values.")
+            if camera_matrix[0, 0] <= 0 or camera_matrix[1, 1] <= 0:
+                raise ValueError(f"{path}:{k_key} contains non-positive focal lengths.")
+            if abs(float(np.linalg.det(camera_matrix))) < 1e-12:
+                raise ValueError(f"{path}:{k_key} is singular.")
+            if distortion.size < 4 or not np.all(np.isfinite(distortion)):
+                raise ValueError(
+                    f"{path}:{d_key} must contain at least four finite coefficients."
+                )
+
             error_key = f"intrinsic_error{cam_num}"
             error = float(data[error_key]) if error_key in data else 0.0
+            if not np.isfinite(error) or error < 0:
+                raise ValueError(f"{path}:{error_key} is invalid: {error}.")
             intrinsics[cam_num - 1] = (
-                np.array(data[k_key], dtype=np.float64),
-                np.array(data[d_key], dtype=np.float64),
+                camera_matrix,
+                distortion,
                 error,
             )
 
@@ -132,6 +165,32 @@ def parse_args():
     parser.add_argument("--robust-scale-px", type=float, default=1.0)
     parser.add_argument("--max-final-p95-px", type=float, default=2.5)
     parser.add_argument("--min-pairs", type=int, default=5)
+    parser.add_argument(
+        "--charuco-solver",
+        choices=("global-ba", "pairwise"),
+        default="global-ba",
+        help=(
+            "Robust global camera/board bundle adjustment is the safe default. "
+            "Pairwise preserves the legacy shortest-path solver for comparison only."
+        ),
+    )
+    parser.add_argument(
+        "--charuco-robust-loss",
+        choices=("linear", "soft_l1", "huber", "cauchy", "arctan"),
+        default="soft_l1",
+    )
+    parser.add_argument("--charuco-robust-scale-px", type=float, default=1.0)
+    parser.add_argument("--charuco-max-nfev", type=int, default=300)
+    parser.add_argument("--max-global-reproj-p95-px", type=float, default=2.5)
+    parser.add_argument(
+        "--max-master-focal-deviation",
+        type=float,
+        default=0.03,
+        help=(
+            "Maximum allowed focal-length deviation between master intrinsics "
+            "and the active RealSense color-stream profile."
+        ),
+    )
     parser.add_argument("--squares-x", type=int, default=4)
     parser.add_argument("--squares-y", type=int, default=3)
     parser.add_argument("--square-length", type=float, default=0.063)
@@ -240,6 +299,11 @@ def run_charuco_calibration(args, fixed_intrinsics, master_image_size):
         output=str(args.output),
         ref_camera=args.ref_camera,
         min_pairs=args.min_pairs,
+        charuco_robust_loss=args.charuco_robust_loss,
+        charuco_robust_scale_px=args.charuco_robust_scale_px,
+        charuco_max_nfev=args.charuco_max_nfev,
+        max_global_reproj_p95_px=args.max_global_reproj_p95_px,
+        max_master_focal_deviation=args.max_master_focal_deviation,
     )
 
     calibrator = MulticamCalibrator(calibrator_args)
@@ -254,7 +318,7 @@ def run_charuco_calibration(args, fixed_intrinsics, master_image_size):
     for session_dir in session_dirs:
         print(f"  - {session_dir}")
 
-    print("\nSolving pairwise extrinsics with CALIB_FIX_INTRINSIC.")
+    print("\nInitializing pairwise extrinsics with CALIB_FIX_INTRINSIC.")
     capture_sets = calibrator.load_multicam_captures()
 
     if master_image_size != (0, 0) and calibrator.image_size is not None:
@@ -271,7 +335,21 @@ def run_charuco_calibration(args, fixed_intrinsics, master_image_size):
     ref_cam = args.ref_camera - 1 if args.ref_camera is not None else calibrator.auto_select_ref_camera()
     print(f"\nReference camera: {ref_cam + 1}")
 
-    transforms = calibrator.compose_transforms(ref_cam)
+    initial_transforms = calibrator.compose_transforms(ref_cam)
+    if args.charuco_solver == "global-ba":
+        print(
+            "\nRefining all cameras and all board poses in one robust global "
+            "bundle adjustment."
+        )
+        transforms = calibrator.refine_global_bundle_adjustment(
+            capture_sets, initial_transforms, ref_cam
+        )
+    else:
+        print(
+            "\nWARNING: Using legacy pairwise shortest-path transforms. "
+            "This mode can report low stereo RMS while producing poor global 3D fusion."
+        )
+        transforms = initial_transforms
     calibrator.save_calibration(transforms, ref_cam)
     calibrator.save_calibration_yaml(transforms, ref_cam)
     calibrator.save_calibration_summary(transforms, ref_cam)

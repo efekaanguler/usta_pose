@@ -55,7 +55,8 @@ def capture_intrinsic_images(args, run_dir):
             "--camera-id", str(cam_id),
             "--output-dir", str(cam_dir),
             "--num-captures", str(args.num_captures),
-            "--capture-interval", str(args.capture_interval),
+        "--capture-interval", str(args.capture_interval),
+        "--min-pose-change", str(args.min_pose_change),
             "--width", str(args.width),
             "--height", str(args.height),
             "--fps", str(args.fps),
@@ -89,6 +90,7 @@ def calculate_master_intrinsics(args, run_dir, output_path):
         ref_camera=1,
     )
     calibrator = MulticamCalibrator(calibrator_args)
+    factory_intrinsics = {}
 
     for cam_idx in range(args.num_cameras):
         cam_dir = run_dir / f"cam{cam_idx + 1}"
@@ -98,7 +100,100 @@ def calculate_master_intrinsics(args, run_dir, output_path):
                 f"{cam_dir} has {image_count} images; "
                 f"need at least {args.num_captures} for master intrinsics."
             )
-        calibrator.calibrate_intrinsics(cam_idx, cam_dir)
+        profile_path = cam_dir / "camera_profile.json"
+        initial_camera_matrix = None
+        if profile_path.exists():
+            with open(profile_path, "r", encoding="utf-8") as profile_file:
+                profile = json.load(profile_file)
+            factory = profile.get("factory_color_intrinsics")
+            if factory:
+                initial_camera_matrix = np.array(
+                    [
+                        [factory["fx"], 0.0, factory["ppx"]],
+                        [0.0, factory["fy"], factory["ppy"]],
+                        [0.0, 0.0, 1.0],
+                    ],
+                    dtype=np.float64,
+                )
+                factory_intrinsics[cam_idx] = factory
+        calibrator.calibrate_intrinsics(
+            cam_idx,
+            cam_dir,
+            initial_camera_matrix=initial_camera_matrix,
+        )
+
+    quality_failures = []
+    for cam_idx in range(args.num_cameras):
+        cam_num = cam_idx + 1
+        camera_matrix, _, rms_error = calibrator.intrinsics[cam_idx]
+        diagnostics = calibrator.intrinsic_diagnostics[cam_idx]
+        if rms_error > args.max_rms:
+            quality_failures.append(
+                f"cam{cam_num} RMS {rms_error:.3f}px > {args.max_rms:.3f}px"
+            )
+        if diagnostics["normal_span_deg"] < args.min_normal_span:
+            quality_failures.append(
+                f"cam{cam_num} normal span "
+                f"{diagnostics['normal_span_deg']:.1f}deg < "
+                f"{args.min_normal_span:.1f}deg"
+            )
+        if (
+            diagnostics["image_center_span_ratio"]
+            < args.min_image_center_span
+        ):
+            quality_failures.append(
+                f"cam{cam_num} image span "
+                f"{diagnostics['image_center_span_ratio']:.2f} < "
+                f"{args.min_image_center_span:.2f}"
+            )
+        if diagnostics["depth_span_m"] < args.min_depth_span:
+            quality_failures.append(
+                f"cam{cam_num} depth span "
+                f"{diagnostics['depth_span_m']:.2f}m < "
+                f"{args.min_depth_span:.2f}m"
+            )
+
+        factory = factory_intrinsics.get(cam_idx)
+        if factory:
+            focal_deviation = max(
+                abs(camera_matrix[0, 0] / factory["fx"] - 1.0),
+                abs(camera_matrix[1, 1] / factory["fy"] - 1.0),
+            )
+            principal_deviation = np.hypot(
+                camera_matrix[0, 2] - factory["ppx"],
+                camera_matrix[1, 2] - factory["ppy"],
+            ) / np.hypot(factory["width"], factory["height"])
+            diagnostics["factory_focal_deviation_ratio"] = float(
+                focal_deviation
+            )
+            diagnostics["factory_principal_deviation_ratio"] = float(
+                principal_deviation
+            )
+            print(
+                f"  Camera {cam_num}: factory delta "
+                f"focal={100.0 * focal_deviation:.2f}%, "
+                f"principal={100.0 * principal_deviation:.2f}% diagonal"
+            )
+            if focal_deviation > args.max_focal_deviation:
+                quality_failures.append(
+                    f"cam{cam_num} focal deviation "
+                    f"{100.0 * focal_deviation:.2f}% > "
+                    f"{100.0 * args.max_focal_deviation:.2f}%"
+                )
+            if principal_deviation > args.max_principal_deviation:
+                quality_failures.append(
+                    f"cam{cam_num} principal-point deviation "
+                    f"{100.0 * principal_deviation:.2f}% > "
+                    f"{100.0 * args.max_principal_deviation:.2f}%"
+                )
+
+    if quality_failures:
+        raise RuntimeError(
+            "Master intrinsic calibration rejected by quality gate:\n  - "
+            + "\n  - ".join(quality_failures)
+            + "\nMove and tilt the board across the full image, vary distance, "
+            "and prefer a larger ChArUco board with more internal corners."
+        )
 
     created_at = datetime.now().isoformat(timespec="seconds")
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -144,6 +239,7 @@ def calculate_master_intrinsics(args, run_dir, output_path):
             "cy": float(K[1, 2]),
             "distortion": dist.flatten().astype(float).tolist(),
             "mean_reprojection_error_px": float(error),
+            "diagnostics": calibrator.intrinsic_diagnostics[cam_idx],
         }
 
     np.savez(output_path, **data)
@@ -171,6 +267,13 @@ def parse_args():
     parser.add_argument("--num-cameras", type=int, default=4)
     parser.add_argument("--num-captures", type=int, default=50)
     parser.add_argument("--capture-interval", type=float, default=4.0)
+    parser.add_argument("--min-pose-change", type=float, default=0.025)
+    parser.add_argument("--max-rms", type=float, default=0.8)
+    parser.add_argument("--min-normal-span", type=float, default=20.0)
+    parser.add_argument("--min-image-center-span", type=float, default=0.30)
+    parser.add_argument("--min-depth-span", type=float, default=0.25)
+    parser.add_argument("--max-focal-deviation", type=float, default=0.03)
+    parser.add_argument("--max-principal-deviation", type=float, default=0.03)
     parser.add_argument("--manual", action="store_true", help="Use manual SPACE capture instead of auto-capture.")
     parser.add_argument("--skip-capture", action="store_true", help="Recalculate from an existing --input-run.")
     parser.add_argument("--input-run", type=Path, default=None, help="Existing intrinsic run directory with cam1..cam4.")
@@ -188,6 +291,10 @@ def parse_args():
         parser.error("--num-captures must be at least 50 for master intrinsics.")
     if args.square_length <= args.marker_length:
         parser.error("--square-length must be greater than --marker-length.")
+    if args.capture_interval <= 0:
+        parser.error("--capture-interval must be greater than zero.")
+    if args.min_pose_change < 0:
+        parser.error("--min-pose-change cannot be negative.")
     if args.skip_capture and args.input_run is None:
         parser.error("--skip-capture requires --input-run.")
     return args

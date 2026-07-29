@@ -15,7 +15,7 @@
 #
 #  The AprilTag cube flow remains available explicitly with --method cube.
 #
-#  Final output is always overwritten at:
+#  A solved candidate replaces the final output only after the live PCL check:
 #      ../record/recordings/multicam_calibration.npz
 #
 # =============================================================================
@@ -29,6 +29,11 @@ CALIB_DIR="${RECORDINGS_DIR}/calib_data"
 EXTRINSIC_DIR="${CALIB_DIR}/extrinsic"
 MASTER_INTRINSICS="${CALIB_DIR}/master_intrinsics.npz"
 OUTPUT_FILE="${RECORDINGS_DIR}/multicam_calibration.npz"
+CANDIDATE_OUTPUT="${RECORDINGS_DIR}/.multicam_calibration_candidate.npz"
+OUTPUT_YAML="${RECORDINGS_DIR}/multicam_calibration.yaml"
+CANDIDATE_YAML="${RECORDINGS_DIR}/.multicam_calibration_candidate.yaml"
+OUTPUT_SUMMARY="${RECORDINGS_DIR}/multicam_calibration_summary.json"
+CANDIDATE_SUMMARY="${RECORDINGS_DIR}/.multicam_calibration_candidate_summary.json"
 CAM_CONFIG="${RECORD_DIR}/camera_config.json"
 IDEAL_CUBE_LAYOUT="${RECORD_DIR}/apriltag_cube_layout.json"
 CALIBRATED_CUBE_LAYOUT="${RECORD_DIR}/apriltag_cube_layout_calibrated.json"
@@ -63,8 +68,29 @@ ok()   { echo -e "\033[1;32m  ✓ $*\033[0m"; }
 warn() { echo -e "\033[1;33m  ⚠ $*\033[0m"; }
 die()  { echo -e "\033[1;31m  ✗ $*\033[0m"; exit 1; }
 
+cleanup_candidate() {
+    rm -f "${CANDIDATE_OUTPUT}" "${CANDIDATE_YAML}" "${CANDIDATE_SUMMARY}"
+}
+
+publish_candidate() {
+    [[ -f "${CANDIDATE_OUTPUT}" ]] || \
+        die "Validated candidate file is missing: ${CANDIDATE_OUTPUT}"
+
+    if [[ -f "${CANDIDATE_YAML}" ]]; then
+        mv -f "${CANDIDATE_YAML}" "${OUTPUT_YAML}"
+    else
+        rm -f "${OUTPUT_YAML}"
+    fi
+    if [[ -f "${CANDIDATE_SUMMARY}" ]]; then
+        mv -f "${CANDIDATE_SUMMARY}" "${OUTPUT_SUMMARY}"
+    else
+        rm -f "${OUTPUT_SUMMARY}"
+    fi
+    mv -f "${CANDIDATE_OUTPUT}" "${OUTPUT_FILE}"
+}
+
 usage() {
-    sed -n '1,35p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
     cat <<EOF
 
 Options:
@@ -203,6 +229,8 @@ python_cmd() {
 }
 
 mkdir -p "${CALIB_DIR}" "${EXTRINSIC_DIR}" "${RECORDINGS_DIR}"
+cleanup_candidate
+trap cleanup_candidate EXIT
 
 if [[ "${METHOD}" != "cube" && "${METHOD}" != "charuco" ]]; then
     die "--method must be cube or charuco"
@@ -285,7 +313,7 @@ python_cmd "${SCRIPT_DIR}/calculate.py" \
     --method "${METHOD}" \
     --master-intrinsics "${MASTER_INTRINSICS}" \
     --extrinsic-dir "${EXTRINSIC_DIR}" \
-    --output "${OUTPUT_FILE}" \
+    --output "${CANDIDATE_OUTPUT}" \
     --num-cameras 4 \
     --ref-camera "${REF_CAMERA}" \
     --min-pairs "${MIN_PAIRS}" \
@@ -294,22 +322,9 @@ python_cmd "${SCRIPT_DIR}/calculate.py" \
     --charuco-solver "${CHARUCO_SOLVER}" \
     "${BOARD_ARGS[@]}"
 
-if [[ -f "${OUTPUT_FILE}" ]]; then
-    ok "Calibration completed and overwritten: ${OUTPUT_FILE}"
-    echo ""
-    echo "  Fixed intrinsics : ${MASTER_INTRINSICS}"
-    echo "  Calib data       : ${CALIB_DIR}"
-    echo "  Final NPZ        : ${OUTPUT_FILE}"
-    echo ""
-    echo "  NPZ keys include:"
-    echo "    K1..K4, dist1..dist4"
-    echo "    R_1_to_ref..R_4_to_ref"
-    echo "    t_1_to_ref..t_4_to_ref"
-    echo "    T_ref_to_cam1..T_ref_to_cam4"
-    echo "    T_cam1_to_ref..T_cam4_to_ref"
-else
-    die "Output file was not created: ${OUTPUT_FILE}"
-fi
+[[ -f "${CANDIDATE_OUTPUT}" ]] || \
+    die "Candidate calibration was not created: ${CANDIDATE_OUTPUT}"
+ok "Candidate calibration solved; the last known-good file is still untouched"
 
 if [[ "${SKIP_PCL_CHECK}" == false ]]; then
     log "Step 3/3: validating live multi-camera depth/PCL alignment"
@@ -317,14 +332,29 @@ if [[ "${SKIP_PCL_CHECK}" == false ]]; then
     if python_cmd "${RECORD_DIR}/felfelfeci3.py" \
         --cam-config "${CAM_CONFIG}" \
         --output-dir "${RECORDINGS_DIR}" \
-        --calib-check-npz "${OUTPUT_FILE}" \
+        --calib-check-npz "${CANDIDATE_OUTPUT}" \
         --calib-check-method pcl \
         --pcl-check-only \
         --no-gui; then
         ok "Morning PCL alignment validation accepted"
+        publish_candidate
     else
-        die "Morning PCL alignment validation failed. Calibration was saved for diagnostics but must not be used for recording."
+        die "Morning PCL alignment validation failed. The rejected candidate was removed and the previous known-good calibration was preserved."
     fi
 else
     warn "Final live depth/PCL validation skipped"
+    publish_candidate
 fi
+
+ok "Calibration published atomically: ${OUTPUT_FILE}"
+echo ""
+echo "  Fixed intrinsics : ${MASTER_INTRINSICS}"
+echo "  Calib data       : ${CALIB_DIR}"
+echo "  Final NPZ        : ${OUTPUT_FILE}"
+echo ""
+echo "  NPZ keys include:"
+echo "    K1..K4, dist1..dist4"
+echo "    R_1_to_ref..R_4_to_ref"
+echo "    t_1_to_ref..t_4_to_ref"
+echo "    T_ref_to_cam1..T_ref_to_cam4"
+echo "    T_cam1_to_ref..T_cam4_to_ref"

@@ -171,13 +171,36 @@ class CharucoStereoCaptureApp:
 
         detected_image = image.copy()
 
-        num_markers = 0 if marker_ids is None or len(marker_ids) == 0 else len(marker_ids)
-        num_corners = 0 if charuco_corners is None or len(charuco_corners) == 0 else len(charuco_corners)
+        num_markers = 0
+        if marker_corners is not None and marker_ids is not None:
+            marker_ids = np.asarray(marker_ids, dtype=np.int32).reshape(-1, 1)
+            if len(marker_corners) == len(marker_ids):
+                num_markers = len(marker_ids)
+
+        valid_charuco = False
+        if charuco_corners is not None and charuco_ids is not None:
+            try:
+                charuco_corners = np.asarray(
+                    charuco_corners, dtype=np.float32
+                ).reshape(-1, 1, 2)
+                charuco_ids = np.asarray(
+                    charuco_ids, dtype=np.int32
+                ).reshape(-1, 1)
+                valid_charuco = (
+                    len(charuco_corners) > 0
+                    and len(charuco_corners) == len(charuco_ids)
+                    and len(np.unique(charuco_ids)) == len(charuco_ids)
+                    and np.isfinite(charuco_corners).all()
+                )
+            except (TypeError, ValueError):
+                valid_charuco = False
+
+        num_corners = len(charuco_corners) if valid_charuco else 0
 
         if num_markers > 0:
             cv2.aruco.drawDetectedMarkers(detected_image, marker_corners, marker_ids)
 
-        if num_corners > 0:
+        if valid_charuco:
             cv2.aruco.drawDetectedCornersCharuco(detected_image, charuco_corners, charuco_ids)
             return charuco_corners, charuco_ids, detected_image, num_corners
 

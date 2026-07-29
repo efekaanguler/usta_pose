@@ -53,6 +53,8 @@ class CharucoIntrinsicCaptureApp:
         self.capture_interval = args.capture_interval
         self.last_capture_time = 0
         self.countdown_start_time = None
+        self.last_capture_detection = None
+        self.factory_intrinsics = None
 
     def setup_charuco_board(self):
         """Initialize ChArUco board detector with specified parameters"""
@@ -188,7 +190,21 @@ class CharucoIntrinsicCaptureApp:
                 config.enable_device(self.serial)
                 config.enable_stream(rs.stream.color, w, h, rs.format.bgr8, fps)
                 print(f"Trying {w}x{h} @ {fps} FPS...", end=" ")
-                self.pipeline.start(config)
+                profile = self.pipeline.start(config)
+                color_profile = profile.get_stream(
+                    rs.stream.color
+                ).as_video_stream_profile()
+                factory = color_profile.get_intrinsics()
+                self.factory_intrinsics = {
+                    "fx": float(factory.fx),
+                    "fy": float(factory.fy),
+                    "ppx": float(factory.ppx),
+                    "ppy": float(factory.ppy),
+                    "width": int(factory.width),
+                    "height": int(factory.height),
+                    "model": str(factory.model),
+                    "coeffs": [float(value) for value in factory.coeffs],
+                }
                 print("OK")
                 self.actual_width = w
                 self.actual_height = h
@@ -230,18 +246,41 @@ class CharucoIntrinsicCaptureApp:
         charuco_corners, charuco_ids, marker_corners, marker_ids = self.charuco_detector.detectBoard(gray)
         detected_image = image.copy()
 
-        if marker_ids is not None and len(marker_ids) > 0:
+        num_markers = 0
+        if marker_corners is not None and marker_ids is not None:
+            marker_ids = np.asarray(marker_ids, dtype=np.int32).reshape(-1, 1)
+        if (
+            marker_corners is not None
+            and marker_ids is not None
+            and len(marker_corners) == len(marker_ids)
+        ):
             num_markers = len(marker_ids)
             cv2.aruco.drawDetectedMarkers(detected_image, marker_corners, marker_ids)
-        else:
-            num_markers = 0
 
-        if charuco_corners is not None and len(charuco_corners) > 0:
+        valid_charuco = False
+        if charuco_corners is not None and charuco_ids is not None:
+            try:
+                charuco_corners = np.asarray(
+                    charuco_corners, dtype=np.float32
+                ).reshape(-1, 1, 2)
+                charuco_ids = np.asarray(
+                    charuco_ids, dtype=np.int32
+                ).reshape(-1, 1)
+                valid_charuco = (
+                    len(charuco_corners) > 0
+                    and len(charuco_corners) == len(charuco_ids)
+                    and len(np.unique(charuco_ids)) == len(charuco_ids)
+                    and np.isfinite(charuco_corners).all()
+                )
+            except (TypeError, ValueError):
+                valid_charuco = False
+
+        if valid_charuco:
             num_corners = len(charuco_corners)
             cv2.aruco.drawDetectedCornersCharuco(detected_image, charuco_corners, charuco_ids)
             return charuco_corners, charuco_ids, detected_image, num_corners, num_markers
-        else:
-            return None, None, detected_image, 0, num_markers
+
+        return None, None, detected_image, 0, num_markers
 
 
     def create_info_overlay(self, image, num_corners, num_markers, is_good=False):
@@ -273,6 +312,37 @@ class CharucoIntrinsicCaptureApp:
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
         return overlay
+
+    def pose_change_ratio(self, corners, ids, image):
+        """Return board-corner displacement since the last accepted capture."""
+        if self.last_capture_detection is None:
+            return float("inf")
+        previous_corners, previous_ids = self.last_capture_detection
+        if corners is None or ids is None:
+            return 0.0
+
+        current_by_id = {
+            int(corner_id): corner.reshape(2)
+            for corner, corner_id in zip(corners, ids.reshape(-1))
+        }
+        previous_by_id = {
+            int(corner_id): corner.reshape(2)
+            for corner, corner_id in zip(
+                previous_corners, previous_ids.reshape(-1)
+            )
+        }
+        common_ids = sorted(set(current_by_id) & set(previous_by_id))
+        if len(common_ids) < 4:
+            return 0.0
+        displacement = np.median(
+            [
+                np.linalg.norm(
+                    current_by_id[corner_id] - previous_by_id[corner_id]
+                )
+                for corner_id in common_ids
+            ]
+        )
+        return float(displacement / np.hypot(image.shape[1], image.shape[0]))
 
     def add_countdown_overlay(self, image, time_remaining):
         """Add countdown timer overlay"""
@@ -398,7 +468,15 @@ class CharucoIntrinsicCaptureApp:
                 corners, ids, detected, num_corners, num_markers = self.detect_charuco(image)
 
                 min_corners = (self.args.squares_x - 1) * (self.args.squares_y - 1)  # require all corners
-                is_good = corners is not None and num_corners >= min_corners
+                board_is_good = corners is not None and num_corners >= min_corners
+                pose_change = self.pose_change_ratio(corners, ids, image)
+                pose_is_novel = (
+                    self.last_capture_detection is None
+                    or pose_change >= self.args.min_pose_change
+                )
+                is_good = board_is_good and (
+                    pose_is_novel or not self.auto_capture
+                )
 
                 display = self.create_info_overlay(detected, num_corners, num_markers, is_good)
 
@@ -416,7 +494,7 @@ class CharucoIntrinsicCaptureApp:
                         if self.countdown_start_time is None:
                             self.countdown_start_time = current_time
 
-                        countdown_duration = 1
+                        countdown_duration = self.capture_interval
                         time_in_countdown = current_time - self.countdown_start_time
                         time_remaining = countdown_duration - time_in_countdown
 
@@ -457,6 +535,10 @@ class CharucoIntrinsicCaptureApp:
 
                     self.capture_count += 1
                     self.last_capture_time = current_time
+                    self.last_capture_detection = (
+                        corners.copy(),
+                        ids.copy(),
+                    )
 
                     print(f"✓ Captured {self.capture_count}/{self.target_captures} "
                           f"({num_corners} corners)")
@@ -475,6 +557,21 @@ class CharucoIntrinsicCaptureApp:
         finally:
             self.pipeline.stop()
             cv2.destroyAllWindows()
+
+            profile_path = self.output_dir / "camera_profile.json"
+            profile = {
+                "camera_id": self.args.camera_id,
+                "serial": self.serial,
+                "actual_stream": {
+                    "width": self.actual_width,
+                    "height": self.actual_height,
+                    "fps": self.actual_fps,
+                },
+                "factory_color_intrinsics": self.factory_intrinsics,
+            }
+            with open(profile_path, "w", encoding="utf-8") as profile_file:
+                import json
+                json.dump(profile, profile_file, indent=2)
 
             print(f"\nCapture session complete!")
             print(f"Total captures: {self.capture_count}")
@@ -504,6 +601,15 @@ def main():
                        help='Enable automatic capture mode with countdown timer')
     parser.add_argument('--capture-interval', type=float, default=4.0,
                        help='Time interval between captures in auto mode (seconds)')
+    parser.add_argument(
+        '--min-pose-change',
+        type=float,
+        default=0.025,
+        help=(
+            'Minimum median board-corner displacement between automatic '
+            'captures, expressed as an image-diagonal ratio'
+        ),
+    )
 
     # ChArUco board parameters
     parser.add_argument('--squares-x', type=int, default=3,
@@ -532,6 +638,10 @@ def main():
 
     if args.square_length <= args.marker_length:
         parser.error("Square length must be greater than marker length")
+    if args.capture_interval <= 0:
+        parser.error("--capture-interval must be greater than zero")
+    if args.min_pose_change < 0:
+        parser.error("--min-pose-change cannot be negative")
 
     app = CharucoIntrinsicCaptureApp(args)
     app.run()

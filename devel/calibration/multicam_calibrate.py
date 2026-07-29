@@ -30,6 +30,7 @@ Usage:
 
 import argparse
 import heapq
+from itertools import combinations
 import cv2
 import numpy as np
 from pathlib import Path
@@ -48,10 +49,16 @@ class MulticamCalibrator:
 
         # Per-camera intrinsics
         self.intrinsics = {}  # cam_idx -> (K, dist, error)
+        self.intrinsic_diagnostics = {}
+        self.capture_factory_intrinsics = {}
 
         # Pairwise extrinsics graph
         # edges[(i,j)] = (R, T, rms, num_pairs)  where P_j = R @ P_i + T
         self.edges = {}
+        self.pair_diagnostics = {}
+        self.cycle_diagnostics = []
+        self.pose_diversity = {}
+        self.global_quality = {}
 
     def setup_charuco_board(self):
         """Initialize ChArUco board."""
@@ -103,14 +110,32 @@ class MulticamCalibrator:
         
         charuco_corners, charuco_ids, _, _ = self.charuco_detector.detectBoard(gray)
 
-        if charuco_corners is not None and len(charuco_corners) >= 4:
-            return charuco_corners, charuco_ids
+        if charuco_corners is None or charuco_ids is None:
+            return None, None
+
+        charuco_corners = np.asarray(charuco_corners, dtype=np.float32).reshape(
+            -1, 1, 2
+        )
+        charuco_ids = np.asarray(charuco_ids, dtype=np.int32).reshape(-1, 1)
+        if (
+            len(charuco_corners) < 4
+            or len(charuco_corners) != len(charuco_ids)
+            or len(np.unique(charuco_ids)) != len(charuco_ids)
+            or not np.all(np.isfinite(charuco_corners))
+        ):
+            return None, None
+        return charuco_corners, charuco_ids
 
         return None, None
 
     # --- Stage 1: Intrinsic Calibration ---
 
-    def calibrate_intrinsics(self, cam_idx, intrinsic_dir):
+    def calibrate_intrinsics(
+        self,
+        cam_idx,
+        intrinsic_dir,
+        initial_camera_matrix=None,
+    ):
         """Calibrate intrinsics for a single camera."""
         intrinsic_path = Path(intrinsic_dir)
         if not intrinsic_path.exists():
@@ -143,25 +168,114 @@ class MulticamCalibrator:
             obj_points.append(obj_pts.astype(np.float32))
             img_points.append(corners.astype(np.float32))
 
-        ret, K, dist, rvecs, tvecs = cv2.calibrateCamera(
-            obj_points, img_points, self.image_size, None, None, flags=0
+        def run_calibration(selected_obj_points, selected_img_points):
+            flags = 0
+            camera_matrix = None
+            distortion = None
+            if initial_camera_matrix is not None:
+                camera_matrix = np.asarray(
+                    initial_camera_matrix, dtype=np.float64
+                ).copy()
+                distortion = np.zeros((5, 1), dtype=np.float64)
+                flags = (
+                    cv2.CALIB_USE_INTRINSIC_GUESS
+                    | cv2.CALIB_FIX_ASPECT_RATIO
+                )
+            return cv2.calibrateCameraExtended(
+                selected_obj_points,
+                selected_img_points,
+                self.image_size,
+                camera_matrix,
+                distortion,
+                flags=flags,
+            )
+
+        calibration = run_calibration(obj_points, img_points)
+        ret, K, dist, rvecs, tvecs = calibration[:5]
+        per_view_errors = np.asarray(calibration[-1]).reshape(-1)
+
+        median_error = float(np.median(per_view_errors))
+        mad_error = float(
+            np.median(np.abs(per_view_errors - median_error))
+        )
+        robust_sigma = 1.4826 * mad_error
+        outlier_threshold = max(
+            1.0,
+            median_error + 3.0 * max(robust_sigma, 0.05),
+        )
+        keep_indices = np.flatnonzero(per_view_errors <= outlier_threshold)
+        minimum_kept = max(12, int(np.ceil(0.75 * len(obj_points))))
+        if len(keep_indices) < len(obj_points) and len(keep_indices) >= minimum_kept:
+            print(
+                f"  Camera {cam_idx + 1}: rejecting "
+                f"{len(obj_points) - len(keep_indices)} high-error intrinsic views "
+                f"(threshold={outlier_threshold:.3f}px)"
+            )
+            obj_points = [obj_points[index] for index in keep_indices]
+            img_points = [img_points[index] for index in keep_indices]
+            calibration = run_calibration(obj_points, img_points)
+            ret, K, dist, rvecs, tvecs = calibration[:5]
+            per_view_errors = np.asarray(calibration[-1]).reshape(-1)
+
+        image_diagonal = float(np.hypot(*self.image_size))
+        normalized_centers = np.asarray(
+            [
+                np.mean(points.reshape(-1, 2), axis=0) / self.image_size
+                for points in img_points
+            ],
+            dtype=np.float64,
+        )
+        center_span = float(
+            np.linalg.norm(
+                np.ptp(normalized_centers, axis=0)
+                * np.asarray(self.image_size, dtype=np.float64)
+            )
+            / image_diagonal
+        )
+        normals = []
+        depths = []
+        for rotation_vector, translation_vector in zip(rvecs, tvecs):
+            rotation, _ = cv2.Rodrigues(rotation_vector)
+            normals.append(rotation[:, 2])
+            depths.append(float(np.asarray(translation_vector).reshape(3)[2]))
+        normal_span = 0.0
+        for first_index in range(len(normals)):
+            for second_index in range(first_index + 1, len(normals)):
+                cosine = np.clip(
+                    np.dot(normals[first_index], normals[second_index]),
+                    -1.0,
+                    1.0,
+                )
+                normal_span = max(
+                    normal_span,
+                    float(np.degrees(np.arccos(cosine))),
+                )
+        depth_span = (
+            float(np.ptp(depths)) if len(depths) > 1 else 0.0
         )
 
-        # Compute mean reprojection error
-        total_error = 0
-        total_points = 0
-        for i, (obj_pts, img_pts) in enumerate(zip(obj_points, img_points)):
-            reproj, _ = cv2.projectPoints(obj_pts, rvecs[i], tvecs[i], K, dist)
-            error = cv2.norm(img_pts, reproj, cv2.NORM_L2) / len(img_pts)
-            total_error += error * len(img_pts)
-            total_points += len(img_pts)
+        rms_error = float(ret)
+        self.intrinsic_diagnostics[cam_idx] = {
+            "accepted_views": len(obj_points),
+            "rejected_views": successful - len(obj_points),
+            "rms_px": rms_error,
+            "per_view_median_px": float(np.median(per_view_errors)),
+            "per_view_p95_px": float(np.percentile(per_view_errors, 95)),
+            "normal_span_deg": normal_span,
+            "image_center_span_ratio": center_span,
+            "depth_span_m": depth_span,
+        }
 
-        mean_error = total_error / total_points
-
-        print(f"  Camera {cam_idx + 1}: RMS={ret:.4f}px, mean_error={mean_error:.4f}px, "
+        print(
+            f"  Camera {cam_idx + 1}: RMS={rms_error:.4f}px, "
+            f"view_P95={np.percentile(per_view_errors, 95):.4f}px, "
               f"fx={K[0, 0]:.1f}, fy={K[1, 1]:.1f}")
+        print(
+            f"    diversity: normal={normal_span:.1f}deg, "
+            f"image span={center_span:.2f}, depth span={depth_span:.2f}m"
+        )
 
-        self.intrinsics[cam_idx] = (K, dist, mean_error)
+        self.intrinsics[cam_idx] = (K, dist, rms_error)
         return K, dist
 
     # --- Stage 2: Pairwise Extrinsics ---
@@ -184,6 +298,17 @@ class MulticamCalibrator:
             if not session_path.exists():
                 print(f"  Warning: Session dir not found: {session_path}")
                 continue
+
+            session_info_path = session_path / "session_info.json"
+            if session_info_path.exists():
+                with open(
+                    session_info_path, "r", encoding="utf-8"
+                ) as session_info_file:
+                    session_info = json.load(session_info_file)
+                for camera_id, profile in session_info.get(
+                    "factory_color_intrinsics", {}
+                ).items():
+                    self.capture_factory_intrinsics[int(camera_id) - 1] = profile
 
             # Discover which cameras are in this session from directory names
             cam_dirs = {}
@@ -222,7 +347,51 @@ class MulticamCalibrator:
             print(f"    {session_sets} sets with >= 2 camera detections")
 
         print(f"\n  Total across all sessions: {len(all_capture_sets)} capture sets")
+        self.validate_master_intrinsics_against_capture_profiles()
         return all_capture_sets
+
+    def validate_master_intrinsics_against_capture_profiles(self):
+        """Reject a master calibration that is inconsistent with camera profiles."""
+        if not self.capture_factory_intrinsics:
+            print(
+                "  Warning: capture profiles do not contain factory intrinsics; "
+                "master-intrinsic plausibility cannot be checked for this old run."
+            )
+            return
+
+        maximum_focal_deviation = float(
+            getattr(self.args, "max_master_focal_deviation", 0.03)
+        )
+        failures = []
+        for camera_index, profile in sorted(
+            self.capture_factory_intrinsics.items()
+        ):
+            if camera_index not in self.intrinsics:
+                continue
+            camera_matrix = self.intrinsics[camera_index][0]
+            focal_deviation = max(
+                abs(camera_matrix[0, 0] / profile["fx"] - 1.0),
+                abs(camera_matrix[1, 1] / profile["fy"] - 1.0),
+            )
+            print(
+                f"  Camera {camera_index + 1}: master/factory focal delta="
+                f"{100.0 * focal_deviation:.2f}%"
+            )
+            if focal_deviation > maximum_focal_deviation:
+                failures.append(
+                    f"cam{camera_index + 1} "
+                    f"{100.0 * focal_deviation:.2f}%"
+                )
+        if failures:
+            raise RuntimeError(
+                "Master intrinsics are implausibly far from the active camera "
+                "profiles (limit "
+                f"{100.0 * maximum_focal_deviation:.1f}%): "
+                + ", ".join(failures)
+                + ". Re-run record_intrinsic.py with full image coverage, "
+                "large two-axis board tilts, and varied depth before solving "
+                "daily extrinsics."
+            )
 
     def calibrate_pairwise_extrinsics(self, capture_sets):
         """
@@ -296,6 +465,449 @@ class MulticamCalibrator:
             baseline = np.linalg.norm(T)
             print(f"    Cameras ({i + 1},{j + 1}): RMS={ret:.4f}px, "
                   f"baseline={baseline:.4f}m, {len(data_list)} pairs")
+
+            diagnostics = self._relative_pose_diagnostics(i, j, data_list, R, T.flatten())
+            self.pair_diagnostics[(i, j)] = diagnostics
+            if diagnostics["valid_pose_samples"]:
+                print(
+                    "      independent PnP spread: "
+                    f"rot median/P95={diagnostics['rotation_median_deg']:.2f}/"
+                    f"{diagnostics['rotation_p95_deg']:.2f}deg, "
+                    f"trans median/P95={diagnostics['translation_median_mm']:.1f}/"
+                    f"{diagnostics['translation_p95_mm']:.1f}mm"
+                )
+
+        self.pose_diversity = self._compute_pose_diversity(capture_sets)
+        self.cycle_diagnostics = self.evaluate_cycle_consistency()
+
+    @staticmethod
+    def _rotation_delta_degrees(rotation_a, rotation_b):
+        delta = rotation_a @ rotation_b.T
+        value = np.clip((np.trace(delta) - 1.0) / 2.0, -1.0, 1.0)
+        return float(np.degrees(np.arccos(value)))
+
+    def _solve_board_pose(self, object_points, image_points, camera_index):
+        camera_matrix, distortion = self.intrinsics[camera_index][0:2]
+        object_points = np.asarray(object_points, dtype=np.float64).reshape(-1, 3)
+        image_points = np.asarray(image_points, dtype=np.float64).reshape(-1, 2)
+        if len(object_points) < 4:
+            return None
+
+        candidates = []
+        try:
+            ok, rvec, tvec = cv2.solvePnP(
+                object_points,
+                image_points,
+                camera_matrix,
+                distortion,
+                flags=cv2.SOLVEPNP_ITERATIVE,
+            )
+        except cv2.error:
+            ok = False
+        if ok:
+            rotation, _ = cv2.Rodrigues(rvec)
+            camera_points = (rotation @ object_points.T).T + np.asarray(tvec).reshape(1, 3)
+            if np.min(camera_points[:, 2]) > 0:
+                projected, _ = cv2.projectPoints(
+                    object_points, rvec, tvec, camera_matrix, distortion
+                )
+                errors = np.linalg.norm(projected.reshape(-1, 2) - image_points, axis=1)
+                candidates.append(
+                    (float(np.median(errors)), rotation, np.asarray(tvec).reshape(3))
+                )
+
+        if not candidates:
+            try:
+                result = cv2.solvePnPGeneric(
+                    object_points,
+                    image_points,
+                    camera_matrix,
+                    distortion,
+                    flags=cv2.SOLVEPNP_IPPE,
+                )
+            except cv2.error:
+                result = None
+            if result is not None and bool(result[0]):
+                pose_candidates = zip(result[1], result[2])
+            else:
+                pose_candidates = ()
+            for rvec, tvec in pose_candidates:
+                rotation, _ = cv2.Rodrigues(rvec)
+                camera_points = (rotation @ object_points.T).T + np.asarray(tvec).reshape(1, 3)
+                if np.min(camera_points[:, 2]) <= 0:
+                    continue
+                projected, _ = cv2.projectPoints(
+                    object_points, rvec, tvec, camera_matrix, distortion
+                )
+                errors = np.linalg.norm(projected.reshape(-1, 2) - image_points, axis=1)
+                candidates.append(
+                    (float(np.median(errors)), rotation, np.asarray(tvec).reshape(3))
+                )
+
+        if not candidates:
+            return None
+        _error, rotation, translation = min(candidates, key=lambda item: item[0])
+        return rotation, translation
+
+    def _relative_pose_diagnostics(self, i, j, data_list, stereo_rotation, stereo_translation):
+        rotation_errors = []
+        translation_errors = []
+        for object_points, image_points_i, image_points_j in data_list:
+            pose_i = self._solve_board_pose(object_points, image_points_i, i)
+            pose_j = self._solve_board_pose(object_points, image_points_j, j)
+            if pose_i is None or pose_j is None:
+                continue
+
+            rotation_i, translation_i = pose_i
+            rotation_j, translation_j = pose_j
+            relative_rotation = rotation_j @ rotation_i.T
+            relative_translation = translation_j - relative_rotation @ translation_i
+            rotation_errors.append(
+                self._rotation_delta_degrees(relative_rotation, stereo_rotation)
+            )
+            translation_errors.append(
+                float(np.linalg.norm(relative_translation - stereo_translation))
+            )
+
+        if not rotation_errors:
+            return {
+                "valid_pose_samples": 0,
+                "rotation_median_deg": float("nan"),
+                "rotation_p95_deg": float("nan"),
+                "translation_median_mm": float("nan"),
+                "translation_p95_mm": float("nan"),
+            }
+
+        return {
+            "valid_pose_samples": len(rotation_errors),
+            "rotation_median_deg": float(np.median(rotation_errors)),
+            "rotation_p95_deg": float(np.percentile(rotation_errors, 95)),
+            "translation_median_mm": float(np.median(translation_errors) * 1000.0),
+            "translation_p95_mm": float(np.percentile(translation_errors, 95) * 1000.0),
+        }
+
+    def _compute_pose_diversity(self, capture_sets):
+        per_camera = {camera_index: [] for camera_index in range(self.num_cameras)}
+        board_points = self.board.getChessboardCorners()
+
+        for capture_set in capture_sets:
+            for camera_index, (corners, ids) in capture_set.items():
+                object_points = board_points[ids.flatten()]
+                pose = self._solve_board_pose(object_points, corners, camera_index)
+                if pose is None:
+                    continue
+                rotation, translation = pose
+                center = np.mean(np.asarray(corners).reshape(-1, 2), axis=0)
+                per_camera[camera_index].append(
+                    (rotation[:, 2], translation, center)
+                )
+
+        diagnostics = {}
+        image_diagonal = (
+            float(np.hypot(*self.image_size)) if self.image_size is not None else 1.0
+        )
+        print("\n  ChArUco pose diversity:")
+        for camera_index, samples in per_camera.items():
+            if not samples:
+                diagnostics[camera_index] = {
+                    "views": 0,
+                    "normal_span_deg": 0.0,
+                    "center_span_ratio": 0.0,
+                    "depth_span_m": 0.0,
+                }
+                continue
+
+            normals = np.asarray([sample[0] for sample in samples])
+            translations = np.asarray([sample[1] for sample in samples])
+            centers = np.asarray([sample[2] for sample in samples])
+            mean_normal = np.mean(normals, axis=0)
+            mean_normal /= max(np.linalg.norm(mean_normal), 1e-12)
+            normal_angles = np.degrees(
+                np.arccos(np.clip(normals @ mean_normal, -1.0, 1.0))
+            )
+            center_span = np.linalg.norm(
+                np.max(centers, axis=0) - np.min(centers, axis=0)
+            ) / image_diagonal
+            depth_span = float(np.ptp(translations[:, 2]))
+            item = {
+                "views": len(samples),
+                "normal_span_deg": float(np.max(normal_angles)),
+                "center_span_ratio": float(center_span),
+                "depth_span_m": depth_span,
+            }
+            diagnostics[camera_index] = item
+            warning = (
+                item["normal_span_deg"] < 12.0
+                or item["center_span_ratio"] < 0.18
+                or item["depth_span_m"] < 0.12
+            )
+            suffix = "  [WEAK DIVERSITY]" if warning else ""
+            print(
+                f"    Camera {camera_index + 1}: views={item['views']}, "
+                f"normal span={item['normal_span_deg']:.1f}deg, "
+                f"image span={item['center_span_ratio']:.2f}, "
+                f"depth span={item['depth_span_m']:.2f}m{suffix}"
+            )
+        return diagnostics
+
+    def evaluate_cycle_consistency(self):
+        diagnostics = []
+        print("\n  Pairwise graph cycle consistency:")
+        for i, j, k in combinations(range(self.num_cameras), 3):
+            if any(
+                self.get_transform(src, dst)[0] is None
+                for src, dst in ((i, j), (j, k), (k, i))
+            ):
+                continue
+            rotation_ij, translation_ij = self.get_transform(i, j)
+            rotation_jk, translation_jk = self.get_transform(j, k)
+            rotation_ki, translation_ki = self.get_transform(k, i)
+            rotation_loop = rotation_ki @ rotation_jk @ rotation_ij
+            translation_loop = (
+                rotation_ki @ (rotation_jk @ translation_ij + translation_jk)
+                + translation_ki
+            )
+            item = {
+                "cycle": [i + 1, j + 1, k + 1, i + 1],
+                "rotation_error_deg": self._rotation_delta_degrees(
+                    rotation_loop, np.eye(3)
+                ),
+                "translation_error_mm": float(
+                    np.linalg.norm(translation_loop) * 1000.0
+                ),
+            }
+            diagnostics.append(item)
+            print(
+                f"    {i + 1}->{j + 1}->{k + 1}->{i + 1}: "
+                f"rot={item['rotation_error_deg']:.2f}deg, "
+                f"trans={item['translation_error_mm']:.1f}mm"
+            )
+        if not diagnostics:
+            print("    No complete three-camera cycles available.")
+        return diagnostics
+
+    def refine_global_bundle_adjustment(self, capture_sets, initial_transforms, ref_cam):
+        try:
+            from scipy.optimize import least_squares
+            from scipy.sparse import lil_matrix
+        except ImportError as exc:
+            raise RuntimeError(
+                "Global ChArUco bundle adjustment requires scipy."
+            ) from exc
+
+        board_points = self.board.getChessboardCorners().astype(np.float64)
+        camera_slices = {}
+        board_slices = []
+        parameters = []
+
+        for camera_index in range(self.num_cameras):
+            if camera_index == ref_cam:
+                continue
+            transform = initial_transforms.get(camera_index)
+            if transform is None:
+                raise RuntimeError(
+                    f"Camera {camera_index + 1} is unreachable from camera {ref_cam + 1}."
+                )
+            rotation, translation = transform
+            rvec, _ = cv2.Rodrigues(rotation)
+            start = len(parameters)
+            parameters.extend(rvec.reshape(3))
+            parameters.extend(np.asarray(translation).reshape(3))
+            camera_slices[camera_index] = slice(start, start + 6)
+
+        usable_capture_sets = []
+        for capture_set in capture_sets:
+            board_to_ref = None
+            for camera_index, (corners, ids) in capture_set.items():
+                object_points = board_points[ids.flatten()]
+                board_to_camera = self._solve_board_pose(
+                    object_points, corners, camera_index
+                )
+                camera_transform = initial_transforms.get(camera_index)
+                if board_to_camera is None or camera_transform is None:
+                    continue
+                rotation_board_camera, translation_board_camera = board_to_camera
+                rotation_ref_camera, translation_ref_camera = camera_transform
+                rotation_board_ref = (
+                    rotation_ref_camera.T @ rotation_board_camera
+                )
+                translation_board_ref = rotation_ref_camera.T @ (
+                    translation_board_camera - translation_ref_camera
+                )
+                board_to_ref = (rotation_board_ref, translation_board_ref)
+                break
+
+            if board_to_ref is None:
+                continue
+            rotation, translation = board_to_ref
+            rvec, _ = cv2.Rodrigues(rotation)
+            start = len(parameters)
+            parameters.extend(rvec.reshape(3))
+            parameters.extend(np.asarray(translation).reshape(3))
+            board_slices.append(slice(start, start + 6))
+            usable_capture_sets.append(capture_set)
+
+        if len(usable_capture_sets) < self.args.min_pairs:
+            raise RuntimeError(
+                f"Only {len(usable_capture_sets)} capture sets could initialize bundle adjustment."
+            )
+
+        parameters = np.asarray(parameters, dtype=np.float64)
+        residual_count = sum(
+            2 * len(ids)
+            for capture_set in usable_capture_sets
+            for _camera_index, (_corners, ids) in capture_set.items()
+        )
+        sparsity = lil_matrix((residual_count, len(parameters)), dtype=np.int8)
+        row = 0
+        for capture_index, capture_set in enumerate(usable_capture_sets):
+            board_slice = board_slices[capture_index]
+            for camera_index, (_corners, ids) in capture_set.items():
+                count = 2 * len(ids)
+                sparsity[row:row + count, board_slice] = 1
+                if camera_index != ref_cam:
+                    sparsity[row:row + count, camera_slices[camera_index]] = 1
+                row += count
+
+        def unpack_camera(values, camera_index):
+            if camera_index == ref_cam:
+                return np.eye(3), np.zeros(3)
+            chunk = values[camera_slices[camera_index]]
+            rotation, _ = cv2.Rodrigues(chunk[:3])
+            return rotation, chunk[3:6]
+
+        def residuals(values, return_metadata=False):
+            output = []
+            metadata = []
+            for capture_index, capture_set in enumerate(usable_capture_sets):
+                board_chunk = values[board_slices[capture_index]]
+                rotation_board_ref, _ = cv2.Rodrigues(board_chunk[:3])
+                translation_board_ref = board_chunk[3:6]
+                for camera_index, (corners, ids) in capture_set.items():
+                    rotation_ref_camera, translation_ref_camera = unpack_camera(
+                        values, camera_index
+                    )
+                    object_points = board_points[ids.flatten()]
+                    points_ref = (
+                        rotation_board_ref @ object_points.T
+                    ).T + translation_board_ref
+                    points_camera = (
+                        rotation_ref_camera @ points_ref.T
+                    ).T + translation_ref_camera
+                    camera_matrix, distortion = self.intrinsics[camera_index][0:2]
+                    projected, _ = cv2.projectPoints(
+                        points_camera,
+                        np.zeros(3),
+                        np.zeros(3),
+                        camera_matrix,
+                        distortion,
+                    )
+                    delta = (
+                        projected.reshape(-1, 2)
+                        - np.asarray(corners).reshape(-1, 2)
+                    )
+                    output.extend(delta.reshape(-1))
+                    if return_metadata:
+                        metadata.extend(
+                            (camera_index, float(np.linalg.norm(error)))
+                            for error in delta
+                        )
+            values_out = np.asarray(output, dtype=np.float64)
+            if not np.all(np.isfinite(values_out)):
+                raise RuntimeError("Non-finite residuals encountered in global calibration.")
+            if return_metadata:
+                return values_out, metadata
+            return values_out
+
+        print(
+            f"\n  Global bundle adjustment: {len(usable_capture_sets)} board poses, "
+            f"{residual_count // 2} observed corners, {len(parameters)} parameters"
+        )
+        result = least_squares(
+            residuals,
+            parameters,
+            jac_sparsity=sparsity.tocsr(),
+            method="trf",
+            loss=getattr(self.args, "charuco_robust_loss", "soft_l1"),
+            f_scale=getattr(self.args, "charuco_robust_scale_px", 1.0),
+            x_scale="jac",
+            max_nfev=getattr(self.args, "charuco_max_nfev", 300),
+            verbose=0,
+        )
+        if not result.success or not np.all(np.isfinite(result.x)):
+            raise RuntimeError(
+                f"Global ChArUco bundle adjustment failed: {result.message}"
+            )
+
+        transforms = {ref_cam: (np.eye(3), np.zeros(3))}
+        for camera_index in range(self.num_cameras):
+            if camera_index == ref_cam:
+                continue
+            transforms[camera_index] = unpack_camera(result.x, camera_index)
+
+        _flat_residuals, metadata = residuals(result.x, return_metadata=True)
+        all_errors = np.asarray([item[1] for item in metadata], dtype=np.float64)
+        if len(all_errors) == 0 or not np.all(np.isfinite(all_errors)):
+            raise RuntimeError(
+                "Global ChArUco calibration produced no finite reprojection errors."
+            )
+        quality = {
+            "optimizer_message": str(result.message),
+            "cost": float(result.cost),
+            "observed_corners": int(len(all_errors)),
+            "median_reprojection_error_px": float(np.median(all_errors)),
+            "p95_reprojection_error_px": float(np.percentile(all_errors, 95)),
+            "max_reprojection_error_px": float(np.max(all_errors)),
+            "per_camera": {},
+        }
+        for camera_index in range(self.num_cameras):
+            camera_errors = np.asarray(
+                [error for cam, error in metadata if cam == camera_index],
+                dtype=np.float64,
+            )
+            if len(camera_errors) == 0:
+                raise RuntimeError(
+                    "Global ChArUco calibration has no accepted observations for "
+                    f"camera {camera_index + 1}."
+                )
+            quality["per_camera"][camera_index] = {
+                "corners": int(len(camera_errors)),
+                "median_reprojection_error_px": float(np.median(camera_errors)),
+                "p95_reprojection_error_px": float(
+                    np.percentile(camera_errors, 95)
+                ),
+            }
+
+        self.global_quality = quality
+        print(
+            "  Global BA reprojection: "
+            f"median={quality['median_reprojection_error_px']:.3f}px, "
+            f"P95={quality['p95_reprojection_error_px']:.3f}px, "
+            f"max={quality['max_reprojection_error_px']:.3f}px"
+        )
+        for camera_index, item in quality["per_camera"].items():
+            print(
+                f"    Camera {camera_index + 1}: corners={item['corners']}, "
+                f"median={item['median_reprojection_error_px']:.3f}px, "
+                f"P95={item['p95_reprojection_error_px']:.3f}px"
+            )
+
+        max_p95 = getattr(self.args, "max_global_reproj_p95_px", 2.5)
+        worst_camera_index, worst_camera_quality = max(
+            quality["per_camera"].items(),
+            key=lambda item: item[1]["p95_reprojection_error_px"],
+        )
+        aggregate_p95 = quality["p95_reprojection_error_px"]
+        worst_camera_p95 = worst_camera_quality["p95_reprojection_error_px"]
+        if aggregate_p95 > max_p95 or worst_camera_p95 > max_p95:
+            raise RuntimeError(
+                "Global ChArUco calibration failed the reprojection quality gate: "
+                f"aggregate P95={aggregate_p95:.3f}px, "
+                f"worst camera={worst_camera_index + 1} "
+                f"P95={worst_camera_p95:.3f}px, limit={max_p95:.3f}px. "
+                "Do not use this calibration."
+            )
+        return transforms
 
     # --- Graph-based path composition ---
 
@@ -472,6 +1084,9 @@ class MulticamCalibrator:
             'ref_camera': ref_cam + 1,  # 1-indexed for user-facing
             'num_cameras': self.num_cameras,
             'image_size': np.array(self.image_size) if self.image_size else np.array([0, 0]),
+            'transform_convention': np.array(
+                'legacy R_i_to_ref/t_i_to_ref keys store ref_to_camera'
+            ),
         }
 
         for cam_idx in range(self.num_cameras):
@@ -484,19 +1099,31 @@ class MulticamCalibrator:
                 R_to_ref, t_to_ref = transforms[cam_idx]
                 data[f'R_{cam_num}_to_ref'] = R_to_ref
                 data[f't_{cam_num}_to_ref'] = t_to_ref
+                transform_ref_to_camera = np.eye(4)
+                transform_ref_to_camera[:3, :3] = R_to_ref
+                transform_ref_to_camera[:3, 3] = t_to_ref
+                data[f'T_ref_to_cam{cam_num}'] = transform_ref_to_camera
+                data[f'T_cam{cam_num}_to_ref'] = np.linalg.inv(
+                    transform_ref_to_camera
+                )
 
         # Backward-compatible keys for 2-camera pipeline
-        if self.num_cameras >= 2 and 0 in transforms and 1 in transforms:
-            # Compute R_1_to_2: transform from cam1 to cam2
-            # cam1 -> ref -> cam2_inv is complex; just provide if we have direct edge
-            if (0, 1) in self.edges:
-                R_12, T_12, _, _ = self.edges[(0, 1)]
-                data['R_1_to_2'] = R_12
-                data['t_1_to_2'] = T_12
-            elif (1, 0) in self.edges:
-                R_21, T_21, _, _ = self.edges[(1, 0)]
-                data['R_1_to_2'] = R_21.T
-                data['t_1_to_2'] = -R_21.T @ T_21
+        if (
+            self.num_cameras >= 2
+            and transforms.get(0) is not None
+            and transforms.get(1) is not None
+        ):
+            rotation_ref_camera_1, translation_ref_camera_1 = transforms[0]
+            rotation_ref_camera_2, translation_ref_camera_2 = transforms[1]
+            rotation_1_to_2 = (
+                rotation_ref_camera_2 @ rotation_ref_camera_1.T
+            )
+            translation_1_to_2 = (
+                translation_ref_camera_2
+                - rotation_1_to_2 @ translation_ref_camera_1
+            )
+            data['R_1_to_2'] = rotation_1_to_2
+            data['t_1_to_2'] = translation_1_to_2
 
         np.savez(self.args.output, **data)
         print(f"\nSaved calibration to {self.args.output}")
@@ -531,8 +1158,8 @@ class MulticamCalibrator:
 
             if cam_idx != ref_cam and transforms.get(cam_idx) is not None:
                 R_to_ref, t_to_ref = transforms[cam_idx]
-                R_ref_to_cam = R_to_ref.T
-                t_ref_to_cam = -R_to_ref.T @ t_to_ref
+                R_ref_to_cam = R_to_ref
+                t_ref_to_cam = t_to_ref
                 
                 cam_data['transform_from_ref'] = {
                     'rotation_matrix': R_ref_to_cam.tolist(),
@@ -558,7 +1185,11 @@ class MulticamCalibrator:
             "cameras_calibrated": sum(1 for v in transforms.values() if v is not None),
             "intrinsics": {},
             "pairwise_edges": [],
-            "transforms_from_ref": {}
+            "transforms_from_ref": {},
+            "pair_pose_diagnostics": {},
+            "cycle_consistency": self.cycle_diagnostics,
+            "pose_diversity": {},
+            "global_bundle_adjustment": self.global_quality,
         }
         
         for cam_idx in range(self.num_cameras):
@@ -576,6 +1207,12 @@ class MulticamCalibrator:
                 "baseline_meters": float(np.linalg.norm(T)),
                 "num_shared_captures": int(n)
             })
+            diagnostics = self.pair_diagnostics.get((i, j))
+            if diagnostics:
+                summary["pair_pose_diagnostics"][f"camera_{i + 1}_camera_{j + 1}"] = diagnostics
+
+        for camera_index, diagnostics in self.pose_diversity.items():
+            summary["pose_diversity"][f"camera_{camera_index + 1}"] = diagnostics
             
         for cam_idx in range(self.num_cameras):
             if cam_idx == ref_cam:
@@ -584,8 +1221,8 @@ class MulticamCalibrator:
                 continue
                 
             R_to_ref, t_to_ref = transforms[cam_idx]
-            R_ref_to_cam = R_to_ref.T
-            t_ref_to_cam = -R_to_ref.T @ t_to_ref
+            R_ref_to_cam = R_to_ref
+            t_ref_to_cam = t_to_ref
             
             baseline = float(np.linalg.norm(t_ref_to_cam))
             rvec, _ = cv2.Rodrigues(R_ref_to_cam)
@@ -692,9 +1329,8 @@ class MulticamCalibrator:
                 continue
 
             R_to_ref, t_to_ref = transforms[cam_idx]
-            # Invert to get ref -> cam: P_cam = R_to_ref^T @ (P_ref - t_to_ref)
-            R_ref_to_cam = R_to_ref.T
-            t_ref_to_cam = -R_to_ref.T @ t_to_ref
+            R_ref_to_cam = R_to_ref
+            t_ref_to_cam = t_to_ref
 
             baseline = np.linalg.norm(t_ref_to_cam)
             rvec, _ = cv2.Rodrigues(R_ref_to_cam)
@@ -734,6 +1370,14 @@ def main():
                         help='Reference camera (1-indexed). Auto-select if not specified.')
     parser.add_argument('--min-pairs', type=int, default=5,
                         help='Minimum shared captures for a pairwise calibration')
+    parser.add_argument(
+        '--charuco-robust-loss',
+        choices=('linear', 'soft_l1', 'huber', 'cauchy', 'arctan'),
+        default='soft_l1',
+    )
+    parser.add_argument('--charuco-robust-scale-px', type=float, default=1.0)
+    parser.add_argument('--charuco-max-nfev', type=int, default=300)
+    parser.add_argument('--max-global-reproj-p95-px', type=float, default=2.5)
 
     # ChArUco board parameters
     parser.add_argument('--squares-x', type=int, default=3)

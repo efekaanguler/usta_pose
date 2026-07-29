@@ -84,7 +84,19 @@ class CharucoStereoCalibrator:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         charuco_corners, charuco_ids, _, _ = self.charuco_detector.detectBoard(gray)
 
-        if charuco_corners is not None and len(charuco_corners) >= 4:
+        if charuco_corners is None or charuco_ids is None:
+            return None, None
+
+        charuco_corners = np.asarray(charuco_corners, dtype=np.float32).reshape(
+            -1, 1, 2
+        )
+        charuco_ids = np.asarray(charuco_ids, dtype=np.int32).reshape(-1, 1)
+        if (
+            len(charuco_corners) >= 4
+            and len(charuco_corners) == len(charuco_ids)
+            and len(np.unique(charuco_ids)) == len(charuco_ids)
+            and np.all(np.isfinite(charuco_corners))
+        ):
             return charuco_corners, charuco_ids
 
         return None, None

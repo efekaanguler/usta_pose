@@ -70,6 +70,7 @@ class MulticamCaptureApp:
         self.auto_capture = args.auto_capture
         self.countdown_start_time = None
         self.last_capture_time = 0
+        self.last_capture_detections = None
 
     def setup_charuco_board(self):
         """Initialize ChArUco board detector."""
@@ -162,6 +163,7 @@ class MulticamCaptureApp:
 
         # Start pipelines
         self.pipelines = []
+        self.factory_intrinsics = {}
         for i, serial in enumerate(self.serials):
             pipe = rs.pipeline()
             started = False
@@ -171,7 +173,23 @@ class MulticamCaptureApp:
                     cfg.enable_device(serial)
                     cfg.enable_stream(rs.stream.color, w, h, rs.format.bgr8, fps)
                     print(f"  Camera {self.camera_ids[i]} ({serial}): {w}x{h}@{fps}...", end=" ")
-                    pipe.start(cfg)
+                    profile = pipe.start(cfg)
+                    color_profile = profile.get_stream(
+                        rs.stream.color
+                    ).as_video_stream_profile()
+                    factory = color_profile.get_intrinsics()
+                    self.factory_intrinsics[str(self.camera_ids[i])] = {
+                        "fx": float(factory.fx),
+                        "fy": float(factory.fy),
+                        "ppx": float(factory.ppx),
+                        "ppy": float(factory.ppy),
+                        "width": int(factory.width),
+                        "height": int(factory.height),
+                        "model": str(factory.model),
+                        "coeffs": [
+                            float(value) for value in factory.coeffs
+                        ],
+                    }
                     print("OK")
                     started = True
                     break
@@ -200,13 +218,36 @@ class MulticamCaptureApp:
 
         detected_image = image.copy()
 
-        num_markers = 0 if marker_ids is None or len(marker_ids) == 0 else len(marker_ids)
-        num_corners = 0 if charuco_corners is None or len(charuco_corners) == 0 else len(charuco_corners)
+        num_markers = 0
+        if marker_corners is not None and marker_ids is not None:
+            marker_ids = np.asarray(marker_ids, dtype=np.int32).reshape(-1, 1)
+            if len(marker_corners) == len(marker_ids):
+                num_markers = len(marker_ids)
+
+        valid_charuco = False
+        if charuco_corners is not None and charuco_ids is not None:
+            try:
+                charuco_corners = np.asarray(
+                    charuco_corners, dtype=np.float32
+                ).reshape(-1, 1, 2)
+                charuco_ids = np.asarray(
+                    charuco_ids, dtype=np.int32
+                ).reshape(-1, 1)
+                valid_charuco = (
+                    len(charuco_corners) > 0
+                    and len(charuco_corners) == len(charuco_ids)
+                    and len(np.unique(charuco_ids)) == len(charuco_ids)
+                    and np.isfinite(charuco_corners).all()
+                )
+            except (TypeError, ValueError):
+                valid_charuco = False
+
+        num_corners = len(charuco_corners) if valid_charuco else 0
 
         if num_markers > 0:
             cv2.aruco.drawDetectedMarkers(detected_image, marker_corners, marker_ids)
 
-        if num_corners > 0:
+        if valid_charuco:
             cv2.aruco.drawDetectedCornersCharuco(detected_image, charuco_corners, charuco_ids)
             return charuco_corners, charuco_ids, detected_image, num_corners
 
@@ -270,6 +311,53 @@ class MulticamCaptureApp:
 
         return overlay
 
+    def pose_change_ratio(self, detections, images):
+        """Return median board-corner displacement since the last accepted capture."""
+        if self.last_capture_detections is None:
+            return float("inf")
+
+        camera_changes = []
+        for current, previous, image in zip(
+            detections, self.last_capture_detections, images
+        ):
+            current_corners, current_ids = current[0], current[1]
+            previous_corners, previous_ids = previous
+            if (
+                image is None
+                or current_corners is None
+                or current_ids is None
+                or previous_corners is None
+                or previous_ids is None
+            ):
+                continue
+
+            current_by_id = {
+                int(corner_id): corner.reshape(2)
+                for corner, corner_id in zip(
+                    current_corners, current_ids.reshape(-1)
+                )
+            }
+            previous_by_id = {
+                int(corner_id): corner.reshape(2)
+                for corner, corner_id in zip(
+                    previous_corners, previous_ids.reshape(-1)
+                )
+            }
+            common_ids = sorted(set(current_by_id) & set(previous_by_id))
+            if len(common_ids) < 4:
+                continue
+
+            displacements = [
+                np.linalg.norm(current_by_id[corner_id] - previous_by_id[corner_id])
+                for corner_id in common_ids
+            ]
+            image_diagonal = float(np.hypot(image.shape[1], image.shape[0]))
+            camera_changes.append(float(np.median(displacements)) / image_diagonal)
+
+        if not camera_changes:
+            return 0.0
+        return float(np.median(camera_changes))
+
     def run(self):
         """Main capture loop."""
         print(f"\n{'=' * 60}")
@@ -278,9 +366,16 @@ class MulticamCaptureApp:
         print(f"Cameras: {self.num_cameras}")
         print(f"Target: {self.target_captures} capture sets")
         print(f"Min cameras per capture: {self.args.min_cameras}")
+        print(
+            f"Minimum pose change: {100.0 * self.args.min_pose_change:.2f}% "
+            f"of image diagonal"
+        )
 
         if self.auto_capture:
-            print(f"Mode: AUTO-CAPTURE (3s countdown)")
+            print(
+                f"Mode: AUTO-CAPTURE "
+                f"({self.args.capture_interval:.1f}s countdown)"
+            )
         else:
             print(f"Mode: MANUAL (press SPACE to capture)")
 
@@ -325,7 +420,15 @@ class MulticamCaptureApp:
                     if corners is not None and nc >= min_corners
                 )
 
-                is_ready = detecting_cameras >= self.args.min_cameras
+                board_visible = detecting_cameras >= self.args.min_cameras
+                pose_change = self.pose_change_ratio(detections, images)
+                pose_is_novel = (
+                    self.last_capture_detections is None
+                    or pose_change >= self.args.min_pose_change
+                )
+                is_ready = board_visible and (
+                    pose_is_novel or not self.auto_capture
+                )
 
                 # Build display grid
                 display_images = []
@@ -342,7 +445,7 @@ class MulticamCaptureApp:
                         if self.countdown_start_time is None:
                             self.countdown_start_time = current_time
 
-                        countdown_duration = 1
+                        countdown_duration = self.args.capture_interval
                         time_in_countdown = current_time - self.countdown_start_time
                         time_remaining = countdown_duration - time_in_countdown
 
@@ -359,7 +462,15 @@ class MulticamCaptureApp:
                         self.countdown_start_time = None
 
                 # Show which cameras are detecting
-                status_text = f"Detecting: {detecting_cameras}/{self.num_cameras} cams"
+                if board_visible and not pose_is_novel and self.auto_capture:
+                    status_text = (
+                        f"MOVE/TILT BOARD: pose change "
+                        f"{100.0 * pose_change:.2f}%"
+                    )
+                else:
+                    status_text = (
+                        f"Detecting: {detecting_cameras}/{self.num_cameras} cams"
+                    )
                 status_color = (0, 255, 0) if is_ready else (0, 0, 255)
                 for i in range(len(display_images)):
                     h = display_images[i].shape[0]
@@ -415,6 +526,13 @@ class MulticamCaptureApp:
 
                     self.capture_count += 1
                     self.last_capture_time = current_time
+                    self.last_capture_detections = [
+                        (
+                            None if corners is None else corners.copy(),
+                            None if ids is None else ids.copy(),
+                        )
+                        for corners, ids, _, _ in detections
+                    ]
 
                     print(f"Captured {self.capture_count}/{self.target_captures}  [{', '.join(cam_status)}]")
 
@@ -437,6 +555,7 @@ class MulticamCaptureApp:
                 "serials": {str(cid): s for cid, s in zip(self.camera_ids, self.serials)},
                 "num_captures": self.capture_count,
                 "timestamp": datetime.now().isoformat(),
+                "factory_color_intrinsics": self.factory_intrinsics,
             }
             info_path = self.output_dir / "session_info.json"
             with open(info_path, 'w') as f:
@@ -474,6 +593,15 @@ def main():
                         help='Enable automatic capture with countdown')
     parser.add_argument('--capture-interval', type=float, default=4.0,
                         help='Seconds between auto-captures')
+    parser.add_argument(
+        '--min-pose-change',
+        type=float,
+        default=0.015,
+        help=(
+            'Minimum median ChArUco-corner displacement between automatic '
+            'captures, expressed as an image-diagonal ratio'
+        ),
+    )
 
     # ChArUco board parameters
     parser.add_argument('--squares-x', type=int, default=3,
@@ -502,6 +630,9 @@ def main():
 
     if args.min_cameras < 2:
         parser.error("--min-cameras must be at least 2")
+
+    if args.min_pose_change < 0:
+        parser.error("--min-pose-change cannot be negative")
 
     actual_num = len(args.camera_ids.split(',')) if args.camera_ids else args.num_cameras
     if args.min_cameras > actual_num:
