@@ -32,6 +32,8 @@ Bu deponun GitHub Pages adresi etkinleştirildiğinde oyun şu adreste açılır
   göre oyun kurulurken belirlenir ve oyun sırasında değişmez.
 - Özel pullu hücrelerde şekil kısıtlaması yoktur; doğru numaralı her disk
   gelebilir. Şekiller yalnızca gizli puan hesabını etkiler.
+- Normal yerleştirmelerde P1/P2 pulu bırakılmaz. Diski kimin koyduğuna
+  bakılmaksızın, şekil hangi gizli kitapçıkla eşleşiyorsa puanı o oyuncu alır.
 - Bir oyuncu üst üste en fazla iki disk koyabilir. İkinci yerleştirmeden sonra
   aktif oyuncu otomatik değişir; takas bu sınırı sıfırlamaz.
 - **Takas yap** ile iki elden birer disk seçin; en fazla 6 takas yapılabilir.

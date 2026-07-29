@@ -161,11 +161,11 @@ function renderBoard() {
     if (placement) {
       const disk = DISK_MAP[placement.diskId];
       const light = LIGHT_COLORS.has(disk.color) ? " light" : "";
-      content = `<div class="placed-disk${light}" style="background:${COLOR_VALUES[disk.color]}" title="${disk.color} · ${disk.number}/${disk.shape}"><strong>${disk.number}</strong><small>${SHAPE_ICONS[disk.shape]}</small></div><span class="owner-chip ${placement.owner.toLowerCase()}">${placement.owner}</span>`;
+      content = `<div class="placed-disk${light}" style="background:${COLOR_VALUES[disk.color]}" title="${disk.color} · ${disk.number}/${disk.shape}"><strong>${disk.number}</strong><small>${SHAPE_ICONS[disk.shape]}</small></div>`;
     }
     const owner = special ? specialOwner(type) : null;
     const specialInfo = special ? `<span class="special-seal ${owner.toLowerCase()}">Ö${owner}</span>` : "";
-    return `<button class="board-cell type-${type}${eligible ? " eligible" : ""}${chainLocked ? " chain-locked" : ""}${special ? " special-cell" : ""}" data-cell="${index}" type="button" aria-label="Satır ${row + 1}, ${number}${type}${special ? `, ${specialOwner(type)} özel hücresi, her şekil kabul edilir` : ""}${placement ? `, ${DISK_MAP[placement.diskId].color} disk, ${placement.owner}` : ", boş"}"><span class="cell-meta"><b>${number}</b><small>${type}</small></span>${specialInfo}${content}</button>`;
+    return `<button class="board-cell type-${type}${eligible ? " eligible" : ""}${chainLocked ? " chain-locked" : ""}${special ? " special-cell" : ""}" data-cell="${index}" type="button" aria-label="Satır ${row + 1}, ${number}${type}${special ? `, ${specialOwner(type)} özel hücresi, her şekil kabul edilir` : ""}${placement ? `, ${DISK_MAP[placement.diskId].color} disk` : ", boş"}"><span class="cell-meta"><b>${number}</b><small>${type}</small></span>${specialInfo}${content}</button>`;
   }).join("");
 }
 
@@ -267,7 +267,7 @@ function placeDisk(cellIndex) {
     diskId: disk.id,
     cellIndex
   });
-  state.board[cellIndex] = { diskId: disk.id, owner: placedBy };
+  state.board[cellIndex] = { diskId: disk.id };
   state.hands[placedBy] = state.hands[placedBy].filter(id => id !== disk.id);
   state.selectedDisk = null;
   const filled = state.board.filter(Boolean).length;
@@ -333,7 +333,7 @@ function confirmTrade() {
 function calculateScore(player) {
   const target = TARGETS[state.targets[player]];
   return state.board.reduce((total, placement, index) => {
-    if (!placement || placement.owner !== player) return total;
+    if (!placement) return total;
     const disk = DISK_MAP[placement.diskId];
     const row = Math.floor(index / 6);
     const type = BOARD_TYPES[row][index % 6];

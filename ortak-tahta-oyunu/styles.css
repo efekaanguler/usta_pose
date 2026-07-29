@@ -176,8 +176,6 @@ h1, h2 { font-family: "Space Grotesk", sans-serif; margin: 0; letter-spacing: -.
 .placed-disk.light { color: var(--ink); }
 .placed-disk strong { font-family: "Space Grotesk"; font-size: clamp(17px,2.1vw,30px); }
 .placed-disk small { position: absolute; right: 12%; bottom: 9%; font-size: clamp(8px,1vw,13px); }
-.owner-chip { position: absolute; z-index: 3; right: -5px; bottom: -5px; width: 27px; height: 27px; display: grid; place-items: center; border-radius: 50%; color: white; border: 2px solid var(--cream); font-size: 8px; font-weight: 900; background: var(--p1); }
-.owner-chip.p2 { background: var(--p2); }
 .board-legend { display: flex; justify-content: center; gap: 18px; color: var(--muted); font-size: 10px; margin: 13px 0; }
 .board-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: -1px; margin-right: 4px; border: 1px solid var(--line); }
 .legend-a { background: var(--a); } .legend-b { background: var(--b); } .legend-n { background: var(--n); }
@@ -253,7 +251,6 @@ h1, h2 { font-family: "Space Grotesk", sans-serif; margin: 0; letter-spacing: -.
   .cell-meta b { font-size: 12px; }
   .special-seal { width: 25px; height: 25px; top: -7px; right: -7px; border-width: 2px; font-size: 6px; }
   .placed-disk { width: 78%; border-width: 2px; }
-  .owner-chip { width: 21px; height: 21px; }
   .hand { grid-template-columns: repeat(6,1fr); }
   .disk-button .disk-number { font-size: 18px; }
   .disk-button .disk-shape { bottom: 6px; right: 8px; }
