@@ -17,26 +17,16 @@ Usage:
 """
 
 import argparse
+import csv
 import json
 import os
-import sys
 from pathlib import Path
 
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 
-# Add revised_process to path for DepthProjector
 script_dir = os.path.dirname(os.path.abspath(__file__))
-revised_dir = os.path.join(os.path.dirname(script_dir), "revised_process")
-if revised_dir not in sys.path:
-    sys.path.append(revised_dir)
-
-try:
-    from extract_pose_independent import DepthProjector
-except ImportError:
-    # Fallback if standalone
-    DepthProjector = None
 
 
 def write_ply(filename, points, colors):
@@ -160,13 +150,119 @@ def intrinsics_from_npz(intrinsics_data, cam_id):
     }
 
 
-def extract_camera_pcl(session_dir, cam_id, meta, intrinsics_data=None, frame_idx=100, step=3, min_z=0.3, max_z=3.5):
+def find_color_video(session_dir, cam_id, cam_meta):
+    storage_file = cam_meta.get("color_storage", {}).get("file")
+    candidates = []
+    if storage_file:
+        candidates.append(os.path.join(session_dir, storage_file))
+    cam_dir = os.path.join(session_dir, f"cam{cam_id}")
+    candidates.extend(
+        [
+            os.path.join(cam_dir, "color.mkv"),
+            os.path.join(cam_dir, "color.mp4"),
+        ]
+    )
+    return next((path for path in candidates if os.path.exists(path)), None)
+
+
+def _deproject_pixels(pixel_x, pixel_y, depth_meters, intrinsics):
+    fx = float(intrinsics["fx"])
+    fy = float(intrinsics["fy"])
+    ppx = float(intrinsics["ppx"])
+    ppy = float(intrinsics["ppy"])
+    x = (pixel_x - ppx) * depth_meters / fx
+    y = (pixel_y - ppy) * depth_meters / fy
+    return np.stack([x, y, depth_meters], axis=1)
+
+
+def raw_depth_points_in_color_camera(
+    raw_depth,
+    color_rgb,
+    cam_meta,
+    step,
+    min_z,
+    max_z,
+):
+    calibration = cam_meta.get("calibration", {})
+    depth_intrinsics = calibration.get("depth_intrinsics")
+    color_intrinsics = calibration.get("color_intrinsics") or cam_meta.get("intrinsics")
+    depth_to_color = calibration.get("depth_to_color_extrinsics")
+    if not depth_intrinsics or not color_intrinsics or not depth_to_color:
+        raise KeyError(
+            "metadata.json lacks depth intrinsics, color intrinsics, or "
+            "depth-to-color extrinsics required for raw-depth geometry."
+        )
+
+    depth_scale = float(
+        calibration.get(
+            "depth_scale_meters_per_unit",
+            cam_meta.get("depth_storage", {}).get(
+                "depth_scale_meters_per_unit", 0.001
+            ),
+        )
+    )
+    depth_meters = raw_depth.astype(np.float32) * depth_scale
+    height, width = depth_meters.shape
+    pixel_x, pixel_y = np.meshgrid(
+        np.arange(0, width, step, dtype=np.float64),
+        np.arange(0, height, step, dtype=np.float64),
+    )
+    sampled_depth = depth_meters[pixel_y.astype(int), pixel_x.astype(int)]
+    valid = (sampled_depth >= min_z) & (sampled_depth <= max_z)
+    points_depth = _deproject_pixels(
+        pixel_x[valid], pixel_y[valid], sampled_depth[valid], depth_intrinsics
+    )
+
+    rotation = np.asarray(
+        depth_to_color["rotation"], dtype=np.float64
+    ).reshape(3, 3, order="F")
+    translation = np.asarray(
+        depth_to_color["translation"], dtype=np.float64
+    ).reshape(3)
+    points_color = (rotation @ points_depth.T).T + translation
+
+    positive = points_color[:, 2] > 0
+    points_color = points_color[positive]
+    color_x = (
+        float(color_intrinsics["fx"]) * points_color[:, 0] / points_color[:, 2]
+        + float(color_intrinsics["ppx"])
+    )
+    color_y = (
+        float(color_intrinsics["fy"]) * points_color[:, 1] / points_color[:, 2]
+        + float(color_intrinsics["ppy"])
+    )
+    color_u = np.rint(color_x).astype(np.int32)
+    color_v = np.rint(color_y).astype(np.int32)
+    color_height, color_width = color_rgb.shape[:2]
+    inside = (
+        (color_u >= 0)
+        & (color_u < color_width)
+        & (color_v >= 0)
+        & (color_v < color_height)
+    )
+    points_color = points_color[inside]
+    colors = color_rgb[color_v[inside], color_u[inside]]
+    return points_color, colors
+
+
+def extract_camera_pcl(
+    session_dir,
+    cam_id,
+    meta,
+    intrinsics_data=None,
+    frame_idx=100,
+    depth_frame_idx=None,
+    step=3,
+    min_z=0.3,
+    max_z=3.5,
+):
     """Extract 3D points (N, 3) and RGB colors (N, 3) for given camera and frame."""
     cam_dir = os.path.join(session_dir, f"cam{cam_id}")
-    color_path = os.path.join(cam_dir, "color.mp4")
     depth_path = os.path.join(cam_dir, "depth.mkv")
+    cam_meta = meta['cameras'][str(cam_id)]
+    color_path = find_color_video(session_dir, cam_id, cam_meta)
 
-    if not os.path.exists(color_path) or not os.path.exists(depth_path):
+    if not color_path or not os.path.exists(depth_path):
         print(f"Warning: Missing files for cam{cam_id}")
         return np.empty((0, 3)), np.empty((0, 3), dtype=np.uint8), None
 
@@ -175,46 +271,133 @@ def extract_camera_pcl(session_dir, cam_id, meta, intrinsics_data=None, frame_id
     ret_c, color_bgr = cap_c.read()
     cap_c.release()
 
-    ret_d, raw_depth = read_lossless_depth_frame(depth_path, frame_idx)
+    if depth_frame_idx is None:
+        depth_frame_idx = frame_idx
+    ret_d, raw_depth = read_lossless_depth_frame(depth_path, depth_frame_idx)
 
     if not ret_c or not ret_d:
-        print(f"Error: Could not read frame {frame_idx} from cam{cam_id}")
+        print(
+            f"Error: Could not read color/depth frames "
+            f"{frame_idx}/{depth_frame_idx} from cam{cam_id}"
+        )
         return np.empty((0, 3)), np.empty((0, 3), dtype=np.uint8), None
 
     color_rgb = cv2.cvtColor(color_bgr, cv2.COLOR_BGR2RGB)
 
-    cam_meta = meta['cameras'][str(cam_id)]
-    intr = intrinsics_from_npz(intrinsics_data, cam_id)
-    if intr is None:
-        intr = cam_meta.get('calibration', {}).get('color_intrinsics') or cam_meta['intrinsics']
-    fx, fy, ppx, ppy = intr['fx'], intr['fy'], intr['ppx'], intr['ppy']
-
-    if DepthProjector is not None:
-        dp = DepthProjector(cam_meta)
-        aligned_depth = dp.depth_for_color(raw_depth)
-        depth_scale = dp.depth_scale
+    storage = cam_meta.get("depth_storage", {})
+    raw_depth_geometry = (
+        storage.get("aligned_to", "depth") == "depth"
+        or storage.get("alignment_mode") == "none_raw_depth"
+    )
+    if raw_depth_geometry:
+        points, colors = raw_depth_points_in_color_camera(
+            raw_depth,
+            color_rgb,
+            cam_meta,
+            step=step,
+            min_z=min_z,
+            max_z=max_z,
+        )
     else:
-        aligned_depth = raw_depth
-        depth_scale = float(cam_meta.get('depth_storage', {}).get('depth_scale_meters_per_unit', 0.001))
-
-    z_meters = aligned_depth.astype(np.float32) * depth_scale
-    h, w = z_meters.shape
-
-    u, v = np.meshgrid(np.arange(0, w, step), np.arange(0, h, step))
-    z = z_meters[v, u]
-
-    valid = (z >= min_z) & (z <= max_z)
-    z_val = z[valid]
-    u_val = u[valid]
-    v_val = v[valid]
-
-    x_val = (u_val - ppx) * z_val / fx
-    y_val = (v_val - ppy) * z_val / fy
-
-    points = np.stack([x_val, y_val, z_val], axis=1)
-    colors = color_rgb[v_val, u_val]
+        intr = (
+            cam_meta.get("calibration", {}).get("color_intrinsics")
+            or cam_meta["intrinsics"]
+        )
+        depth_scale = float(
+            storage.get("depth_scale_meters_per_unit", 0.001)
+        )
+        depth_meters = raw_depth.astype(np.float32) * depth_scale
+        height, width = depth_meters.shape
+        pixel_x, pixel_y = np.meshgrid(
+            np.arange(0, width, step),
+            np.arange(0, height, step),
+        )
+        sampled_depth = depth_meters[pixel_y, pixel_x]
+        valid = (sampled_depth >= min_z) & (sampled_depth <= max_z)
+        points = _deproject_pixels(
+            pixel_x[valid],
+            pixel_y[valid],
+            sampled_depth[valid],
+            intr,
+        )
+        colors = color_rgb[pixel_y[valid], pixel_x[valid]]
 
     return points, colors, color_rgb
+
+
+def read_timestamp_csv(path):
+    rows = []
+    with open(path, "r", newline="", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle):
+            rows.append(
+                (
+                    int(row["frame_idx"]),
+                    float(row["host_timestamp_ms"]),
+                )
+            )
+    return rows
+
+
+def nearest_frame(rows, target_host_ms):
+    if not rows:
+        return None, float("inf")
+    frame_index, host_ms = min(rows, key=lambda item: abs(item[1] - target_host_ms))
+    return frame_index, abs(host_ms - target_host_ms)
+
+
+def synchronized_frame_indices(session_dir, metadata, reference_camera, reference_frame):
+    reference_meta = metadata["cameras"][str(reference_camera)]
+    reference_path = os.path.join(
+        session_dir, reference_meta["color_timestamp_file"]
+    )
+    reference_rows = read_timestamp_csv(reference_path)
+    reference_matches = [
+        host_ms for frame_index, host_ms in reference_rows
+        if frame_index == reference_frame
+    ]
+    if not reference_matches:
+        raise IndexError(
+            f"Reference color frame {reference_frame} is absent from {reference_path}."
+        )
+    target_host_ms = reference_matches[0]
+
+    result = {}
+    for camera_text, camera_meta in metadata["cameras"].items():
+        camera_id = int(camera_text)
+        color_rows = read_timestamp_csv(
+            os.path.join(session_dir, camera_meta["color_timestamp_file"])
+        )
+        depth_rows = read_timestamp_csv(
+            os.path.join(session_dir, camera_meta["depth_timestamp_file"])
+        )
+        color_frame, color_delta = nearest_frame(color_rows, target_host_ms)
+        depth_frame, depth_delta = nearest_frame(depth_rows, target_host_ms)
+        result[camera_id] = {
+            "color_frame": color_frame,
+            "depth_frame": depth_frame,
+            "color_delta_ms": color_delta,
+            "depth_delta_ms": depth_delta,
+        }
+    return result
+
+
+def camera_to_reference_transform(calibration, camera_id, reference_camera):
+    if camera_id == reference_camera:
+        return np.eye(3), np.zeros(3)
+    explicit_key = f"T_cam{camera_id}_to_ref"
+    if explicit_key in calibration:
+        transform = np.asarray(calibration[explicit_key], dtype=np.float64)
+        return transform[:3, :3], transform[:3, 3]
+
+    rotation_ref_camera = np.asarray(
+        calibration[f"R_{camera_id}_to_ref"], dtype=np.float64
+    )
+    translation_ref_camera = np.asarray(
+        calibration[f"t_{camera_id}_to_ref"], dtype=np.float64
+    ).reshape(3)
+    rotation_camera_ref = rotation_ref_camera.T
+    translation_camera_ref = -rotation_camera_ref @ translation_ref_camera
+    return rotation_camera_ref, translation_camera_ref
 
 
 def main():
@@ -224,6 +407,13 @@ def main():
     parser.add_argument("--frame", type=int, default=100, help="Frame index to extract")
     parser.add_argument("--step", type=int, default=3, help="Pixel subsampling step (higher=faster, lower=denser)")
     parser.add_argument("--out-dir", default=None, help="Output folder for PLY and PNG files")
+    parser.add_argument(
+        "--camera-ids",
+        type=int,
+        nargs="+",
+        default=None,
+        help="Cameras to fuse. Defaults to every camera in metadata.json.",
+    )
     args = parser.parse_args()
 
     session_dir = os.path.abspath(args.session_dir)
@@ -238,7 +428,7 @@ def main():
 
     if calib_path and os.path.exists(calib_path):
         print(f"[Calibration] Loaded {calib_path}")
-        calib_data = np.load(calib_path)
+        calib_data = load_npz_dict(calib_path)
     else:
         print("\n" + "!" * 80)
         print("[UYARI] Session klasörü içinde 'multicam_calibration.npz' BULUNAMADI!")
@@ -257,50 +447,85 @@ def main():
 
     out_dir = args.out_dir or os.path.join(session_dir, "pcl_output")
     os.makedirs(out_dir, exist_ok=True)
-    print(f"\n--- Extracting Point Clouds for Frame {args.frame} ---")
-
-    # 1. Extract Cam 1 PCL
-    pts1, col1, rgb1 = extract_camera_pcl(
-        session_dir, 1, meta, intrinsics_data=intrinsics_data,
-        frame_idx=args.frame, step=args.step,
+    camera_ids = args.camera_ids or sorted(
+        int(camera_id) for camera_id in meta["cameras"]
     )
-    ply1_path = os.path.join(out_dir, "cam1_pointcloud.ply")
-    write_ply(ply1_path, pts1, col1)
-
-    # 2. Extract Cam 2 PCL
-    pts2, col2, rgb2 = extract_camera_pcl(
-        session_dir, 2, meta, intrinsics_data=intrinsics_data,
-        frame_idx=args.frame, step=args.step,
+    reference_camera = (
+        int(np.asarray(calib_data["ref_camera"]).item())
+        if calib_data is not None and "ref_camera" in calib_data
+        else camera_ids[0]
     )
-    ply2_path = os.path.join(out_dir, "cam2_pointcloud.ply")
-    write_ply(ply2_path, pts2, col2)
+    synchronized = synchronized_frame_indices(
+        session_dir, meta, reference_camera, args.frame
+    )
+    print(
+        f"\n--- Extracting timestamp-synchronized point clouds at "
+        f"camera {reference_camera} color frame {args.frame} ---"
+    )
 
-    # 3. Transform & Combine (Task 2: 2 tane pcl calib dönüşümü)
-    #
-    # IMPORTANT: The NPZ keys "R_2_to_ref" / "t_2_to_ref" are misleadingly named.
-    # multicam_calibrate.py stores the REF -> CAM transform there:
-    #     P_cam = R_stored @ P_ref + t_stored
-    # To convert cam2 points INTO the reference (world) frame we must INVERT:
-    #     P_ref = R_stored^T @ P_cam  +  (- R_stored^T @ t_stored)
-    # This matches exactly what resample_and_transform.py does in
-    # load_camera_to_ref_transform().
-    if calib_data is not None and len(pts2) > 0:
-        R_ref_to_cam2 = np.asarray(calib_data["R_2_to_ref"], dtype=np.float64)
-        t_ref_to_cam2 = np.asarray(calib_data["t_2_to_ref"], dtype=np.float64).reshape(3)
-        R_cam2_to_world = R_ref_to_cam2.T
-        t_cam2_to_world = -R_cam2_to_world @ t_ref_to_cam2
-        pts2_world = (R_cam2_to_world @ pts2.T).T + t_cam2_to_world
-        print(f"[Calibration] Applied inverted transform (cam2 -> world)")
-    else:
-        pts2_world = pts2
-        t_cam2_to_world = None
+    local_clouds = {}
+    world_clouds = {}
+    camera_origins = {}
+    for camera_id in camera_ids:
+        frame_info = synchronized[camera_id]
+        print(
+            f"  cam{camera_id}: color={frame_info['color_frame']} "
+            f"(delta {frame_info['color_delta_ms']:.2f}ms), "
+            f"depth={frame_info['depth_frame']} "
+            f"(delta {frame_info['depth_delta_ms']:.2f}ms)"
+        )
+        points, colors, rgb = extract_camera_pcl(
+            session_dir,
+            camera_id,
+            meta,
+            intrinsics_data=intrinsics_data,
+            frame_idx=frame_info["color_frame"],
+            depth_frame_idx=frame_info["depth_frame"],
+            step=args.step,
+        )
+        local_clouds[camera_id] = (points, colors, rgb)
+        write_ply(
+            os.path.join(out_dir, f"cam{camera_id}_pointcloud.ply"),
+            points,
+            colors,
+        )
+        if calib_data is not None and len(points):
+            rotation, translation = camera_to_reference_transform(
+                calib_data, camera_id, reference_camera
+            )
+            points_world = (rotation @ points.T).T + translation
+            camera_origins[camera_id] = translation
+        else:
+            points_world = points
+            camera_origins[camera_id] = np.zeros(3)
+        world_clouds[camera_id] = (points_world, colors)
+        write_ply(
+            os.path.join(
+                out_dir,
+                f"cam{camera_id}_pointcloud_in_cam{reference_camera}_frame.ply",
+            ),
+            points_world,
+            colors,
+        )
 
-    pts1_world = pts1  # Cam 1 is reference
-
-    combined_pts = np.vstack([pts1_world, pts2_world])
-    combined_col = np.vstack([col1, col2])
-    # Track which camera each point came from for color-coded overlay
-    cam_labels = np.array([1]*len(pts1_world) + [2]*len(pts2_world))
+    nonempty_points = [
+        world_clouds[camera_id][0]
+        for camera_id in camera_ids
+        if len(world_clouds[camera_id][0])
+    ]
+    nonempty_colors = [
+        world_clouds[camera_id][1]
+        for camera_id in camera_ids
+        if len(world_clouds[camera_id][1])
+    ]
+    combined_pts = (
+        np.vstack(nonempty_points) if nonempty_points else np.empty((0, 3))
+    )
+    combined_col = (
+        np.vstack(nonempty_colors)
+        if nonempty_colors
+        else np.empty((0, 3), dtype=np.uint8)
+    )
     glob_ply_path = os.path.join(out_dir, "global_combined_pointcloud.ply")
     write_ply(glob_ply_path, combined_pts, combined_col)
 
@@ -310,12 +535,18 @@ def main():
 
     n_sample_small = 25000
     n_sample_large = 50000
+    display_camera_ids = camera_ids[:2]
+    while len(display_camera_ids) < 2:
+        display_camera_ids.append(display_camera_ids[0])
+    first_camera, second_camera = display_camera_ids
+    pts1, col1, rgb1 = local_clouds[first_camera]
+    pts2, col2, rgb2 = local_clouds[second_camera]
 
     # --- Row 1, Col 1: Cam 1 RGB ---
     ax1 = fig.add_subplot(2, 3, 1)
     if rgb1 is not None:
         ax1.imshow(rgb1)
-    ax1.set_title(f"Cam 1 — RGB (Frame {args.frame})", fontsize=13, fontweight='bold', color='white')
+    ax1.set_title(f"Cam {first_camera} — RGB", fontsize=13, fontweight='bold', color='white')
     ax1.axis('off')
     ax1.set_facecolor('#1a1a2e')
 
@@ -323,7 +554,7 @@ def main():
     ax2 = fig.add_subplot(2, 3, 4)
     if rgb2 is not None:
         ax2.imshow(rgb2)
-    ax2.set_title(f"Cam 2 — RGB (Frame {args.frame})", fontsize=13, fontweight='bold', color='white')
+    ax2.set_title(f"Cam {second_camera} — RGB", fontsize=13, fontweight='bold', color='white')
     ax2.axis('off')
     ax2.set_facecolor('#1a1a2e')
 
@@ -333,7 +564,7 @@ def main():
     if len(pts1) > 0:
         sub = np.random.choice(len(pts1), min(n_sample_small, len(pts1)), replace=False)
         ax3.scatter(pts1[sub, 0], -pts1[sub, 1], c=col1[sub]/255.0, s=0.4, alpha=0.8)
-    ax3.set_title(f"PCL 1 — Cam 1 Local\n{len(pts1):,} points", fontsize=12, fontweight='bold', color='#66ccff')
+    ax3.set_title(f"Cam {first_camera} Local\n{len(pts1):,} points", fontsize=12, fontweight='bold', color='#66ccff')
     ax3.set_xlabel("X (m)", color='white', fontsize=10)
     ax3.set_ylabel("Y (m, up)", color='white', fontsize=10)
     ax3.tick_params(colors='white')
@@ -345,7 +576,7 @@ def main():
     if len(pts2) > 0:
         sub = np.random.choice(len(pts2), min(n_sample_small, len(pts2)), replace=False)
         ax4.scatter(pts2[sub, 0], -pts2[sub, 1], c=col2[sub]/255.0, s=0.4, alpha=0.8)
-    ax4.set_title(f"PCL 2 — Cam 2 Local\n{len(pts2):,} points", fontsize=12, fontweight='bold', color='#ff9966')
+    ax4.set_title(f"Cam {second_camera} Local\n{len(pts2):,} points", fontsize=12, fontweight='bold', color='#ff9966')
     ax4.set_xlabel("X (m)", color='white', fontsize=10)
     ax4.set_ylabel("Y (m, up)", color='white', fontsize=10)
     ax4.tick_params(colors='white')
@@ -361,9 +592,19 @@ def main():
             c=combined_col[sub]/255.0, s=0.6, alpha=0.7,
         )
         # Add camera origin markers
-        ax5.plot(0, 0, 'v', color='#66ccff', markersize=14, label='Cam 1 (ref)', zorder=10)
-        if calib_data is not None and t_cam2_to_world is not None:
-            ax5.plot(t_cam2_to_world[0], t_cam2_to_world[2], 'v', color='#ff9966', markersize=14, label='Cam 2', zorder=10)
+        marker_colors = ("#66ccff", "#ff9966", "#ffee66", "#bb88ff")
+        for position, camera_id in enumerate(camera_ids):
+            origin = camera_origins[camera_id]
+            suffix = " (ref)" if camera_id == reference_camera else ""
+            ax5.plot(
+                origin[0],
+                origin[2],
+                'v',
+                color=marker_colors[position % len(marker_colors)],
+                markersize=11,
+                label=f"Cam {camera_id}{suffix}",
+                zorder=10,
+            )
         ax5.legend(loc='upper right', fontsize=10, facecolor='#1a1a2e', edgecolor='gray', labelcolor='white')
 
     ax5.set_title(

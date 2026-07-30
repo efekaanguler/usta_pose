@@ -221,7 +221,9 @@ class DepthProjector:
                     "Depth is not color-aligned, but metadata lacks depth_intrinsics "
                     "or depth_to_color_extrinsics."
                 )
-            self.rotation = np.array(extr['rotation'], dtype=np.float32).reshape(3, 3)
+            self.rotation = np.array(
+                extr['rotation'], dtype=np.float32
+            ).reshape(3, 3, order='F')
             self.translation = np.array(extr['translation'], dtype=np.float32).reshape(3)
         else:
             self.depth_intr = None
@@ -394,25 +396,53 @@ class VideoFrameReader:
 
 class DepthFrameReader:
     def __init__(self, path):
-        import av
-        self.container = av.open(path)
-        self.stream = self.container.streams.video[0]
+        self.path = path
         self._frames = {}
-        self._iter = self.container.decode(self.stream)
         self._next_idx = 0
+        self._backend = 'none'
+        try:
+            import av
+            self.container = av.open(path)
+            self.stream = self.container.streams.video[0]
+            self._iter = self.container.decode(self.stream)
+            self._backend = 'av'
+        except Exception:
+            try:
+                import imageio_ffmpeg as iio_ff
+                self._rgen = iio_ff.read_frames(path, pix_fmt='gray16le', bits_per_pixel=16)
+                self._meta = next(self._rgen)
+                self._w, self._h = self._meta['size']
+                self._backend = 'iio_ff'
+            except Exception:
+                self.cap = cv2.VideoCapture(path, cv2.CAP_ANY)
+                self.cap.set(cv2.CAP_PROP_CONVERT_RGB, 0)
+                self._backend = 'cv2'
 
     def read_frame(self, idx):
         if idx in self._frames:
             return self._frames[idx]
 
-        while self._next_idx <= idx:
-            try:
-                frame_av = next(self._iter)
-                arr = frame_av.to_ndarray()
-                self._frames[self._next_idx] = arr
-                self._next_idx += 1
-            except StopIteration:
-                return None
+        if self._backend == 'av':
+            while self._next_idx <= idx:
+                try:
+                    frame_av = next(self._iter)
+                    self._frames[self._next_idx] = frame_av.to_ndarray()
+                    self._next_idx += 1
+                except StopIteration:
+                    return None
+        elif self._backend == 'iio_ff':
+            while self._next_idx <= idx:
+                try:
+                    raw_bytes = next(self._rgen)
+                    self._frames[self._next_idx] = np.frombuffer(raw_bytes, dtype=np.uint16).reshape(self._h, self._w).copy()
+                    self._next_idx += 1
+                except StopIteration:
+                    return None
+        elif self._backend == 'cv2':
+            self.cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            ret, frame = self.cap.read()
+            if ret:
+                self._frames[idx] = frame
 
         return self._frames.get(idx)
 
@@ -422,7 +452,12 @@ class DepthFrameReader:
             del self._frames[k]
 
     def close(self):
-        self.container.close()
+        if self._backend == 'av':
+            self.container.close()
+        elif self._backend == 'iio_ff':
+            self._rgen.close()
+        elif self._backend == 'cv2':
+            self.cap.release()
 
 
 # ---------------------------------------------------------------------------

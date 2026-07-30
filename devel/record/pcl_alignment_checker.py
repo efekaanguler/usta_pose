@@ -74,7 +74,7 @@ def _extrinsics_matrix(extrinsics):
     transform = np.eye(4, dtype=np.float64)
     transform[:3, :3] = np.asarray(
         extrinsics["rotation"], dtype=np.float64
-    ).reshape(3, 3)
+    ).reshape(3, 3, order="F")
     transform[:3, 3] = np.asarray(
         extrinsics["translation"], dtype=np.float64
     ).reshape(3)
@@ -217,6 +217,19 @@ class PCLAlignmentChecker:
             + float(intrinsics["ppy"])
         )
         return pixel_x, pixel_y
+
+    @staticmethod
+    def _z_buffer(projected_u, projected_v, projected_z, width, height):
+        flat_pixels = projected_v * width + projected_u
+        depth_buffer = np.full(width * height, np.inf, dtype=np.float64)
+        np.minimum.at(depth_buffer, flat_pixels, projected_z)
+
+        occupied = np.flatnonzero(np.isfinite(depth_buffer))
+        return (
+            occupied % width,
+            occupied // width,
+            depth_buffer[occupied],
+        )
 
     def _temporal_depth(self, raw_frames, model):
         if not raw_frames:
@@ -387,8 +400,7 @@ class PCLAlignmentChecker:
             & (projected_v >= 0)
             & (projected_v < height)
         )
-        projected_count = int(np.count_nonzero(inside))
-        if projected_count == 0:
+        if not np.any(inside):
             return DirectionMetrics(
                 source_points=source_count,
                 projected_points=0,
@@ -400,9 +412,14 @@ class PCLAlignmentChecker:
                 inlier_ratio=0.0,
             )
 
-        target_z_predicted = points_target_depth[inside, 2]
-        target_u = projected_u[inside]
-        target_v = projected_v[inside]
+        target_u, target_v, target_z_predicted = self._z_buffer(
+            projected_u[inside],
+            projected_v[inside],
+            points_target_depth[inside, 2],
+            width,
+            height,
+        )
+        projected_count = int(len(target_z_predicted))
         observed_z = target_depth[target_v, target_u]
         stable_target = surface_masks[target_camera][target_v, target_u]
 

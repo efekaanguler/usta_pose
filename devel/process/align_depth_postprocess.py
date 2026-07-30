@@ -57,7 +57,9 @@ def _get_depth_to_color_extrinsics(cam_meta):
     if extr is None:
         raise KeyError("Missing depth_to_color_extrinsics in camera metadata")
 
-    rot = np.array(extr["rotation"], dtype=np.float32).reshape(3, 3)
+    rot = np.array(
+        extr["rotation"], dtype=np.float32
+    ).reshape(3, 3, order="F")
     trans = np.array(extr["translation"], dtype=np.float32).reshape(3)
     return rot, trans
 
