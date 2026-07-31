@@ -10,7 +10,7 @@ Color is stored during recording as lossless FFV1 in color.mkv.
 Depth is stored as lossless FFV1 video in MKV container (16-bit grayscale).
 
 Output structure:
-    recordings/session_YYYYMMDD_HHMMSS/
+    recordings/session_YYYY-MM-DD_HH:MM/
         cam1/color.mkv  cam1/depth.mkv
         cam2/color.mkv  cam2/depth.mkv
         cam3/color.mkv  cam3/depth.mkv
@@ -19,6 +19,7 @@ Output structure:
 
 Controls:
     C: Validate live multi-camera depth/PCL alignment
+    E: Executive bypass of the pre-check and unlock recording
     R: Toggle recording on/off
     Q: Quit
     Ctrl+C: Stop and quit (headless/no-gui mode)
@@ -114,17 +115,34 @@ class FFmpegStdinWriter:
     def send(self, data):
         if data is None:
             return
+        returncode = self.process.poll()
+        if returncode is not None:
+            raise RuntimeError(
+                f"FFmpeg exited early for {self.output_path} "
+                f"(return code {returncode})"
+            )
         if self.process.stdin is not None:
-            self.process.stdin.write(data)
+            try:
+                self.process.stdin.write(data)
+            except BrokenPipeError as exc:
+                raise RuntimeError(
+                    f"FFmpeg pipe closed for {self.output_path}"
+                ) from exc
 
     def close(self):
         if self.process.stdin is not None:
-            self.process.stdin.close()
+            try:
+                self.process.stdin.close()
+            except BrokenPipeError:
+                pass
         returncode = self.process.wait()
         if self._owns_log_file:
             self.log_file.close()
         if returncode != 0:
-            print(f"[FFmpeg Writer] Failed for {self.output_path} (return code {returncode})")
+            raise RuntimeError(
+                f"FFmpeg failed for {self.output_path} "
+                f"(return code {returncode})"
+            )
 
 
 class CameraThread:
@@ -153,6 +171,8 @@ class CameraThread:
         self.intrinsics_data = None
         self.calibration_data = None
         self.depth_scale = None  # meters per depth unit (z16)
+        self.usb_type = None
+        self.physical_port = None
 
         # Thread communication
         self.frame_queue = queue.Queue(maxsize=2)
@@ -168,6 +188,15 @@ class CameraThread:
         self.cam_dir = None       # per-camera subdirectory inside session_dir
         self.session_dir = None
         self.frame_count = 0
+        self.capture_count = 0
+        self.writer_frame_count = 0
+        self.queue_drop_count = 0
+        self.duplicate_frame_count = 0
+        self.max_writer_queue_depth = 0
+        self.writer_queue_capacity = 90
+        self.capture_timestamps = []
+        self._last_recorded_color_frame_number = None
+        self._writer_error = None
 
         # Timestamp storage: separate lists for color and depth
         # Each entry: (frame_idx, hw_timestamp_ms, host_timestamp_ms, timestamp_domain)
@@ -216,6 +245,25 @@ class CameraThread:
         # backend_timestamp metadata for cross-camera comparable host-clock
         # timestamps (see _capture_loop).
         device = profile.get_device()
+        try:
+            usb_descriptor = getattr(
+                rs.camera_info, "usb_type_descriptor", None
+            )
+            if usb_descriptor is not None and device.supports(usb_descriptor):
+                self.usb_type = device.get_info(
+                    usb_descriptor
+                )
+        except (AttributeError, RuntimeError):
+            self.usb_type = None
+        try:
+            physical_port = getattr(rs.camera_info, "physical_port", None)
+            if physical_port is not None and device.supports(physical_port):
+                self.physical_port = device.get_info(
+                    physical_port
+                )
+        except (AttributeError, RuntimeError):
+            self.physical_port = None
+
         for sensor in device.sensors:
             # Force frame-rate priority: prevent FPS drops in low light
             if sensor.supports(rs.option.auto_exposure_priority):
@@ -328,6 +376,7 @@ class CameraThread:
 
             # ── Extract hardware timestamps from RealSense frames ──
             color_hw_ts, color_ts_domain = self._get_hw_timestamp(color_frame)
+            color_frame_number = int(color_frame.get_frame_number())
 
             depth_hw_ts = None
             depth_ts_domain = None
@@ -353,7 +402,22 @@ class CameraThread:
 
             # Record if active — hand off to writer thread (no I/O here)
             if self.recording:
-                # Enqueue for the writer thread; drop frame if queue full
+                if (
+                    self._last_recorded_color_frame_number == color_frame_number
+                ):
+                    self.duplicate_frame_count += 1
+                self._last_recorded_color_frame_number = color_frame_number
+                capture_idx = self.capture_count
+                self.capture_count += 1
+                self.capture_timestamps.append(
+                    (
+                        capture_idx,
+                        color_frame_number,
+                        color_hw_ts,
+                        host_ts,
+                        color_ts_domain,
+                    )
+                )
                 if self._write_queue is not None:
                     try:
                         self._write_queue.put_nowait((
@@ -363,8 +427,12 @@ class CameraThread:
                             depth_hw_ts, depth_ts_domain,
                         ))
                         self.frame_count += 1
+                        self.max_writer_queue_depth = max(
+                            self.max_writer_queue_depth,
+                            self._write_queue.qsize(),
+                        )
                     except queue.Full:
-                        pass  # writer can't keep up — drop this frame
+                        self.queue_drop_count += 1
 
             # Always update display queue (use put-replace so it's never stale)
             try:
@@ -389,32 +457,45 @@ class CameraThread:
         """
         while True:
             item = self._write_queue.get()
-            if item is None:  # sentinel from stop_recording
-                break
-            (color_image, depth_image, frame_idx,
-             host_ts,
-             color_hw_ts, color_ts_domain,
-             depth_hw_ts, depth_ts_domain) = item
+            try:
+                if item is None:  # sentinel from stop_recording
+                    break
 
-            # Accumulate timestamp records
-            self.color_timestamps.append(
-                (frame_idx, color_hw_ts, host_ts, color_ts_domain))
-            if depth_hw_ts is not None:
-                self.depth_timestamps.append(
-                    (frame_idx, depth_hw_ts, host_ts, depth_ts_domain))
+                if self._writer_error is not None:
+                    continue
 
-            if self._color_writer is not None:
-                color_bgr = color_image.astype(np.uint8, copy=False)
-                if not color_bgr.flags.c_contiguous:
-                    color_bgr = np.ascontiguousarray(color_bgr)
-                self._color_writer.send(color_bgr.tobytes())
+                (color_image, depth_image, frame_idx,
+                 host_ts,
+                 color_hw_ts, color_ts_domain,
+                 depth_hw_ts, depth_ts_domain) = item
 
-            if depth_image is not None and self._depth_writer is not None:
-                # Store raw uint16 z16 values via FFV1 lossless codec.
-                depth_z16 = depth_image.astype(np.uint16)
-                if not depth_z16.flags.c_contiguous:
-                    depth_z16 = np.ascontiguousarray(depth_z16)
-                self._depth_writer.send(depth_z16.tobytes())
+                if self._color_writer is not None:
+                    color_bgr = color_image.astype(np.uint8, copy=False)
+                    if not color_bgr.flags.c_contiguous:
+                        color_bgr = np.ascontiguousarray(color_bgr)
+                    self._color_writer.send(color_bgr.tobytes())
+
+                if depth_image is not None and self._depth_writer is not None:
+                    depth_z16 = depth_image.astype(np.uint16, copy=False)
+                    if not depth_z16.flags.c_contiguous:
+                        depth_z16 = np.ascontiguousarray(depth_z16)
+                    self._depth_writer.send(depth_z16.tobytes())
+
+                self.color_timestamps.append(
+                    (frame_idx, color_hw_ts, host_ts, color_ts_domain)
+                )
+                if depth_hw_ts is not None:
+                    self.depth_timestamps.append(
+                        (frame_idx, depth_hw_ts, host_ts, depth_ts_domain)
+                    )
+                self.writer_frame_count += 1
+            except Exception as exc:
+                self._writer_error = repr(exc)
+                print(
+                    f"\n[cam{self.cam_idx + 1}] Recording writer failed: {exc}"
+                )
+            finally:
+                self._write_queue.task_done()
 
     def prepare_recording(self, session_dir):
         """Set up writers and directories, but don't start recording yet.
@@ -483,6 +564,14 @@ class CameraThread:
                 json.dump(depth_meta, f, indent=2)
 
         self.frame_count = 0
+        self.capture_count = 0
+        self.writer_frame_count = 0
+        self.queue_drop_count = 0
+        self.duplicate_frame_count = 0
+        self.max_writer_queue_depth = 0
+        self.capture_timestamps = []
+        self._last_recorded_color_frame_number = None
+        self._writer_error = None
         self.color_timestamps = []
         self.depth_timestamps = []
         self._barrier_passed = False
@@ -501,17 +590,23 @@ class CameraThread:
         if self._write_queue is not None:
             self._write_queue.put(None)  # sentinel
         if self._writer_thread is not None:
-            self._writer_thread.join(timeout=30)  # allow time to flush
+            self._writer_thread.join()
             self._writer_thread = None
         self._write_queue = None
 
         if self._color_writer is not None:
-            self._color_writer.close()
+            try:
+                self._color_writer.close()
+            except Exception as exc:
+                self._writer_error = self._writer_error or repr(exc)
             self._color_writer = None
 
         # Close FFV1 depth video writer
         if self._depth_writer is not None:
-            self._depth_writer.close()
+            try:
+                self._depth_writer.close()
+            except Exception as exc:
+                self._writer_error = self._writer_error or repr(exc)
             self._depth_writer = None
 
         # Save per-frame timestamps as CSV (separate files for color and depth)
@@ -543,12 +638,24 @@ class CameraThread:
                 for row in depth_ts_copy:
                     writer.writerow(row)
 
-        frame_count = self.frame_count
+        frame_count = self.writer_frame_count
         # Extract hw timestamps for the timing report (color stream as reference)
         hw_timestamps_ms = [row[1] for row in color_ts_copy]
+        recording_stats = {
+            'capture_frames': self.capture_count,
+            'queued_frames': self.frame_count,
+            'written_frames': self.writer_frame_count,
+            'queue_dropped_frames': self.queue_drop_count,
+            'duplicate_frame_numbers_observed': self.duplicate_frame_count,
+            'max_writer_queue_depth': self.max_writer_queue_depth,
+            'writer_queue_capacity': self.writer_queue_capacity,
+            'writer_error': self._writer_error,
+            '_capture_samples': list(self.capture_timestamps),
+        }
         self.color_timestamps = []
         self.depth_timestamps = []
-        return frame_count, hw_timestamps_ms
+        self.capture_timestamps = []
+        return frame_count, hw_timestamps_ms, recording_stats
 
     def stop(self):
         """Stop capture thread and release pipeline."""
@@ -570,7 +677,13 @@ class CameraThread:
         return frame
 
 
-def generate_frame_timing_report(session_dir, all_timestamps, target_fps, roles):
+def generate_frame_timing_report(
+    session_dir,
+    all_timestamps,
+    target_fps,
+    roles,
+    recording_stats=None,
+):
     """Generate human-readable frame-timing diagnostics for all cameras.
 
     Creates two files in *session_dir*:
@@ -588,12 +701,31 @@ def generate_frame_timing_report(session_dir, all_timestamps, target_fps, roles)
     roles : list[str]
         Per-camera role labels (e.g. ['pose', 'pose', 'gaze', 'gaze']).
     """
-    import csv
-
     expected_interval_ms = 1000.0 / target_fps  # e.g. 33.33 ms for 30 fps
-    # Thresholds for anomaly detection
     drop_threshold_ms = expected_interval_ms * 1.6   # >60% longer → likely dropped frame
-    dup_threshold_ms = expected_interval_ms * 0.4     # <40% of expected → likely duplicate
+    dup_threshold_ms = expected_interval_ms * 0.4    # <40% of expected → likely duplicate
+    recording_stats = recording_stats or {}
+
+    def calculate_timing(timestamp_values):
+        values = np.asarray(
+            [float(timestamp) for timestamp in timestamp_values],
+            dtype=np.float64,
+        )
+        if values.size < 2:
+            return None
+        deltas = np.diff(values)
+        mean_ms = float(np.mean(deltas))
+        return {
+            "frame_count": int(values.size),
+            "duration_seconds": float((values[-1] - values[0]) / 1000.0),
+            "fps": float(1000.0 / mean_ms) if mean_ms > 0 else 0.0,
+            "mean_ms": mean_ms,
+            "std_ms": float(np.std(deltas)),
+            "min_ms": float(np.min(deltas)),
+            "max_ms": float(np.max(deltas)),
+            "late_count": int(np.sum(deltas > drop_threshold_ms)),
+            "fast_count": int(np.sum(deltas < dup_threshold_ms)),
+        }
 
     csv_path = os.path.join(session_dir, "frame_timing_report.csv")
     summary = {}
@@ -606,69 +738,146 @@ def generate_frame_timing_report(session_dir, all_timestamps, target_fps, roles)
         ])
 
         for cam_id in sorted(all_timestamps.keys()):
-            # Force float so deltas are always fractional, never integer
             ts_list = [float(t) for t in all_timestamps[cam_id]]
             role = roles[cam_id - 1] if cam_id - 1 < len(roles) else "unknown"
+            stats = dict(recording_stats.get(cam_id, {}))
+            capture_samples = stats.pop("_capture_samples", [])
+            capture_host_ts = [sample[3] for sample in capture_samples]
+            unique_capture_hw_ts = []
+            last_frame_number = None
+            for sample in capture_samples:
+                frame_number = sample[1]
+                if frame_number == last_frame_number:
+                    continue
+                unique_capture_hw_ts.append(sample[2])
+                last_frame_number = frame_number
 
-            if len(ts_list) < 2:
-                # Not enough frames for meaningful analysis
-                writer.writerow([f"cam{cam_id}", role, 0,
-                                 ts_list[0] if ts_list else "", "", ""])
-                summary[f"cam{cam_id}"] = {
-                    "role": role,
-                    "total_frames": len(ts_list),
-                    "note": "Not enough frames for interval analysis"
-                }
-                continue
-
-            deltas = []
-            drop_count = 0
-            dup_count = 0
+            delivery_timing = calculate_timing(capture_host_ts)
+            capture_timing = calculate_timing(unique_capture_hw_ts)
+            saved_timing = calculate_timing(ts_list)
 
             for i, t in enumerate(ts_list):
                 if i == 0:
                     writer.writerow([f"cam{cam_id}", role, i, round(t, 3), "", ""])
                 else:
                     delta = float(t - ts_list[i - 1])
-                    deltas.append(delta)
-
                     flag = ""
                     if delta > drop_threshold_ms:
                         flag = "LATE"
-                        drop_count += 1
                     elif delta < dup_threshold_ms:
                         flag = "FAST"
-                        dup_count += 1
 
                     writer.writerow([
                         f"cam{cam_id}", role, i, round(t, 3),
                         round(delta, 3), flag
                     ])
 
-            deltas_arr = np.array(deltas)
-            actual_mean = float(np.mean(deltas_arr))
-            actual_std = float(np.std(deltas_arr))
-            actual_min = float(np.min(deltas_arr))
-            actual_max = float(np.max(deltas_arr))
+            capture_fps = (
+                capture_timing["fps"] if capture_timing is not None else 0.0
+            )
+            capture_is_slow = (
+                capture_timing is not None
+                and capture_fps < target_fps * 0.90
+            )
+            queue_drops = int(stats.get("queue_dropped_frames", 0))
+            queued_frames = int(stats.get("queued_frames", len(ts_list)))
+            written_frames = int(stats.get("written_frames", len(ts_list)))
+            writer_error = stats.get("writer_error")
+            queue_capacity = max(
+                1, int(stats.get("writer_queue_capacity", 1))
+            )
+            max_queue_depth = int(stats.get("max_writer_queue_depth", 0))
+            writer_problem = bool(
+                writer_error
+                or queue_drops
+                or written_frames < queued_frames
+            )
+            writer_backpressure = max_queue_depth >= queue_capacity * 0.80
 
-            actual_fps = 1000.0 / actual_mean if actual_mean > 0 else 0.0
-            duration_s = (ts_list[-1] - ts_list[0]) / 1000.0
+            if capture_is_slow and (writer_problem or writer_backpressure):
+                bottleneck = "combined_capture_and_encoder_or_disk"
+            elif writer_problem or writer_backpressure:
+                bottleneck = "encoder_or_disk_backpressure"
+            elif capture_is_slow:
+                bottleneck = "camera_usb_or_capture_side"
+            else:
+                bottleneck = "none_detected"
 
-            summary[f"cam{cam_id}"] = {
+            camera_summary = {
                 "role": role,
                 "total_frames": len(ts_list),
-                "duration_seconds": round(duration_s, 3),
                 "target_fps": target_fps,
                 "expected_interval_ms": round(expected_interval_ms, 3),
-                "actual_fps_avg": round(actual_fps, 3),
-                "interval_mean_ms": round(actual_mean, 3),
-                "interval_std_ms": round(actual_std, 3),
-                "interval_min_ms": round(actual_min, 3),
-                "interval_max_ms": round(actual_max, 3),
-                "jitter_ms": round(actual_std, 3),
-                "late_frames (delta > {:.1f}ms)".format(drop_threshold_ms): drop_count,
-                "fast_frames (delta < {:.1f}ms)".format(dup_threshold_ms): dup_count,
+                "capture_frames": int(
+                    stats.get("capture_frames", len(capture_samples))
+                ),
+                "unique_camera_frames": len(unique_capture_hw_ts),
+                "queued_frames": queued_frames,
+                "written_frames": written_frames,
+                "queue_dropped_frames": queue_drops,
+                "duplicate_frame_numbers_observed": int(
+                    stats.get("duplicate_frame_numbers_observed", 0)
+                ),
+                "max_writer_queue_depth": max_queue_depth,
+                "writer_queue_capacity": queue_capacity,
+                "writer_error": writer_error,
+                "bottleneck_diagnosis": bottleneck,
             }
+
+            if capture_timing is not None:
+                camera_summary.update({
+                    "capture_fps_avg": round(capture_timing["fps"], 3),
+                    "camera_frame_fps_avg": round(
+                        capture_timing["fps"], 3
+                    ),
+                    "capture_interval_mean_ms": round(
+                        capture_timing["mean_ms"], 3
+                    ),
+                    "capture_interval_std_ms": round(
+                        capture_timing["std_ms"], 3
+                    ),
+                    "capture_late_intervals": capture_timing["late_count"],
+                    "capture_fast_intervals": capture_timing["fast_count"],
+                })
+            else:
+                camera_summary["capture_note"] = (
+                    "Not enough captured frames for interval analysis"
+                )
+
+            if delivery_timing is not None:
+                camera_summary["sdk_delivery_fps_avg"] = round(
+                    delivery_timing["fps"], 3
+                )
+            else:
+                camera_summary["sdk_delivery_note"] = (
+                    "Not enough SDK deliveries for interval analysis"
+                )
+
+            if saved_timing is not None:
+                camera_summary.update({
+                    "duration_seconds": round(
+                        saved_timing["duration_seconds"], 3
+                    ),
+                    "actual_fps_avg": round(saved_timing["fps"], 3),
+                    "saved_fps_avg": round(saved_timing["fps"], 3),
+                    "interval_mean_ms": round(saved_timing["mean_ms"], 3),
+                    "interval_std_ms": round(saved_timing["std_ms"], 3),
+                    "interval_min_ms": round(saved_timing["min_ms"], 3),
+                    "interval_max_ms": round(saved_timing["max_ms"], 3),
+                    "jitter_ms": round(saved_timing["std_ms"], 3),
+                    "late_frames (delta > {:.1f}ms)".format(
+                        drop_threshold_ms
+                    ): saved_timing["late_count"],
+                    "fast_frames (delta < {:.1f}ms)".format(
+                        dup_threshold_ms
+                    ): saved_timing["fast_count"],
+                })
+            else:
+                camera_summary["saved_note"] = (
+                    "Not enough written frames for interval analysis"
+                )
+
+            summary[f"cam{cam_id}"] = camera_summary
 
     # Write summary JSON
     summary_path = os.path.join(session_dir, "frame_timing_summary.json")
@@ -682,16 +891,19 @@ def generate_frame_timing_report(session_dir, all_timestamps, target_fps, roles)
     print("\n╔══════════════ FRAME TIMING SUMMARY ══════════════╗")
     for cam_key in sorted(summary.keys()):
         s = summary[cam_key]
-        if "note" in s:
-            print(f"║ {cam_key} ({s['role']}): {s['note']}")
-            continue
+        capture_fps = s.get("capture_fps_avg", 0.0)
+        delivery_fps = s.get("sdk_delivery_fps_avg", 0.0)
+        saved_fps = s.get("saved_fps_avg", 0.0)
         print(f"║ {cam_key} ({s['role']}): "
-              f"{s['total_frames']} frames | "
-              f"avg {s['actual_fps_avg']:.1f} fps | "
-              f"interval {s['interval_mean_ms']:.1f}±{s['interval_std_ms']:.1f} ms | "
-              f"min {s['interval_min_ms']:.1f} max {s['interval_max_ms']:.1f} ms | "
-              f"late:{s.get(list(k for k in s if k.startswith('late'))[0], 0)} "
-              f"fast:{s.get(list(k for k in s if k.startswith('fast'))[0], 0)}")
+              f"camera {capture_fps:.1f} fps | "
+              f"SDK {delivery_fps:.1f} fps | "
+              f"saved {saved_fps:.1f} fps | "
+              f"written {s['written_frames']} | "
+              f"queue-drop {s['queue_dropped_frames']} | "
+              f"duplicate-number {s['duplicate_frame_numbers_observed']} | "
+              f"queue {s['max_writer_queue_depth']}/"
+              f"{s['writer_queue_capacity']} | "
+              f"{s['bottleneck_diagnosis']}")
     print("╚══════════════════════════════════════════════════╝\n")
 
 
@@ -951,7 +1163,12 @@ def main(args):
     print(f"\nStarting {num_cameras} camera streams...")
     for cam in cameras:
         cam.start()
-        print(f"  Camera {cam.cam_idx + 1} ({cam.serial}) started")
+        connection = cam.usb_type or "unknown USB"
+        port = cam.physical_port or "unknown port"
+        print(
+            f"  Camera {cam.cam_idx + 1} ({cam.serial}) started | "
+            f"USB {connection} | {port}"
+        )
 
     time.sleep(1)  # Let threads stabilize
 
@@ -982,9 +1199,11 @@ def main(args):
     session_start_time = None
     session_calibration_path = None
     calib_precheck_ok = not args.calib_check
+    calib_precheck_status = "disabled" if not args.calib_check else "pending"
+    session_precheck_status = None
 
     def run_precheck_gate():
-        nonlocal calib_precheck_ok
+        nonlocal calib_precheck_ok, calib_precheck_status
         if args.calib_check_method == "cube":
             print("\nRunning AprilTag cube calibration pre-check...")
         else:
@@ -994,12 +1213,15 @@ def main(args):
         except Exception as exc:
             print(f"\n\033[1;31mCalibration pre-check failed: {exc}\033[0m")
             calib_precheck_ok = False
+            calib_precheck_status = "failed"
             return False
 
         calib_precheck_ok = bool(precheck_result.ok)
         if calib_precheck_ok:
+            calib_precheck_status = "passed"
             print("\n\033[1;32mPre-check OK. Press R to start recording.\033[0m")
         else:
+            calib_precheck_status = "failed"
             if args.calib_check_method == "cube":
                 remedy = "Adjust cube/cameras"
             else:
@@ -1010,21 +1232,48 @@ def main(args):
             )
         return calib_precheck_ok
 
+    def bypass_precheck_gate():
+        nonlocal calib_precheck_ok, calib_precheck_status
+        if not args.calib_check:
+            return True
+        if calib_precheck_status == "passed":
+            print("\n\033[1;32mPre-check already passed. Press R to record.\033[0m")
+            return True
+        calib_precheck_ok = True
+        calib_precheck_status = "bypassed"
+        print(
+            "\n\033[1;33mExecutive bypass enabled with E. "
+            "Press R to record; metadata will mark this session as bypassed."
+            "\033[0m"
+        )
+        return True
+
     def start_recording_session():
-        nonlocal is_recording, session_dir, session_start_time, session_calibration_path
+        nonlocal is_recording, session_dir, session_start_time
+        nonlocal session_calibration_path, session_precheck_status
         if is_recording:
             return True
 
         if args.calib_check and not calib_precheck_ok:
-            print("\n\033[1;33mRecord locked: press C and get calibration OK before pressing R.\033[0m")
+            print(
+                "\n\033[1;33mRecord locked: press C for the pre-check "
+                "or E to bypass it before pressing R.\033[0m"
+            )
             return False
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        session_dir = str(output_base / f"session_{timestamp}")
-        os.makedirs(session_dir, exist_ok=True)
-        session_calibration_path = copy_latest_calibration_to_session(session_dir, output_base)
-
         session_start_time = datetime.now()
+        timestamp = session_start_time.strftime("%Y-%m-%d_%H:%M")
+        session_path = output_base / f"session_{timestamp}"
+        collision_index = 2
+        while session_path.exists():
+            session_path = output_base / (
+                f"session_{timestamp}_{collision_index:02d}"
+            )
+            collision_index += 1
+        session_path.mkdir(parents=True, exist_ok=False)
+        session_dir = str(session_path)
+        session_calibration_path = copy_latest_calibration_to_session(session_dir, output_base)
+        session_precheck_status = calib_precheck_status
         for cam in cameras:
             cam.prepare_recording(session_dir)
 
@@ -1035,11 +1284,14 @@ def main(args):
 
     def stop_recording_session():
         nonlocal is_recording, calib_precheck_ok
+        nonlocal calib_precheck_status, session_precheck_status
         if not is_recording:
             return
 
         record_event.clear()
-        time.sleep(0.05)  # let capture threads see cleared event
+        for cam in cameras:
+            cam.recording = False
+        time.sleep(0.02)
 
         # Reset barrier for potential next recording session
         try:
@@ -1049,10 +1301,12 @@ def main(args):
 
         frame_counts = {}
         all_timestamps = {}  # cam_idx+1 -> list of timestamps (ms)
+        recording_stats = {}
         for cam in cameras:
-            fc, ts = cam.stop_recording()
+            fc, ts, stats = cam.stop_recording()
             frame_counts[cam.cam_idx + 1] = fc
             all_timestamps[cam.cam_idx + 1] = ts
+            recording_stats[cam.cam_idx + 1] = stats
 
         session_record_end = datetime.now()
 
@@ -1065,6 +1319,15 @@ def main(args):
                 os.path.basename(session_calibration_path)
                 if session_calibration_path else None
             ),
+            'calibration_precheck': {
+                'required': bool(args.calib_check),
+                'method': (
+                    args.calib_check_method if args.calib_check else None
+                ),
+                'status': (
+                    session_precheck_status or calib_precheck_status
+                ),
+            },
             'cameras': {}
         }
 
@@ -1072,9 +1335,16 @@ def main(args):
             metadata['cameras'][str(i + 1)] = {
                 'serial': cam.serial,
                 'role': roles[i],
+                'usb_type': cam.usb_type,
+                'physical_port': cam.physical_port,
                 'intrinsics': cam.intrinsics_data,
                 'calibration': cam.calibration_data,
                 'frame_count': frame_counts[i + 1],
+                'recording_health': {
+                    key: value
+                    for key, value in recording_stats[i + 1].items()
+                    if not key.startswith('_')
+                },
                 'timestamp_source': 'realsense_hardware_clock',
                 'timestamp_host_reference': 'perf_counter',
                 'timestamp_file_format': 'csv',
@@ -1128,18 +1398,35 @@ def main(args):
 
         # --- Frame timing diagnostics ---
         generate_frame_timing_report(
-            session_dir, all_timestamps, args.fps, roles
+            session_dir,
+            all_timestamps,
+            args.fps,
+            roles,
+            recording_stats=recording_stats,
         )
 
         is_recording = False
         if args.calib_check:
             calib_precheck_ok = False
+            calib_precheck_status = "pending"
+        session_precheck_status = None
         print(f"Recording stopped. Frames: {frame_counts}")
         print(f"Metadata saved to {metadata_path}")
 
-    window_name = "4-Camera Session (C=Calib, R=Record, Q=Quit)"
+    window_name = "4-Camera Session (C=Check, E=Executive, R=Record, Q=Quit)"
     if use_gui:
         cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+        try:
+            cv2.setWindowProperty(
+                window_name,
+                cv2.WND_PROP_FULLSCREEN,
+                cv2.WINDOW_FULLSCREEN,
+            )
+        except cv2.error:
+            print(
+                "[GUI] Full-screen mode is unavailable; "
+                "using a resizable window."
+            )
 
     # Cache last good frame per camera to avoid black-frame flicker
     last_frames = None
@@ -1149,7 +1436,11 @@ def main(args):
 
     if use_gui:
         if args.calib_check:
-            print("\nReady. Check camera views first. Press C to run pre-check, R to record after OK, Q to quit.")
+            print(
+                "\nReady. Check camera views first. Press C to run the "
+                "pre-check, E to bypass it, R to record when unlocked, "
+                "or Q to quit."
+            )
         else:
             print("\nReady. Press R to start recording, Q to quit.")
     else:
@@ -1187,11 +1478,14 @@ def main(args):
                 combined = np.vstack([row1, row2])
 
                 if args.calib_check:
-                    if calib_precheck_ok:
+                    if calib_precheck_status == "passed":
                         status_text = "Calibration OK - Press R to start recording | Q quit"
                         status_color = (0, 255, 0)
+                    elif calib_precheck_status == "bypassed":
+                        status_text = "Pre-check BYPASSED (E) - Press R to record | Q quit"
+                        status_color = (0, 165, 255)
                     else:
-                        status_text = "Press C for calibration pre-check | R locked | Q quit"
+                        status_text = "C: pre-check | E: executive bypass | R locked | Q: quit"
                         status_color = (0, 255, 255)
                     cv2.rectangle(combined, (0, 0), (combined.shape[1], 42), (0, 0, 0), -1)
                     cv2.putText(combined, status_text, (18, 28),
@@ -1210,7 +1504,11 @@ def main(args):
                 for i, cam in enumerate(cameras):
                     y = 180 + i * 40
                     cv2.putText(status,
-                                f"Cam {i+1} ({roles[i]}): {cam.frame_count} frames",
+                                (
+                                    f"Cam {i+1} ({roles[i]}): "
+                                    f"{cam.writer_frame_count} written, "
+                                    f"{cam.queue_drop_count} dropped"
+                                ),
                                 (100, y), cv2.FONT_HERSHEY_SIMPLEX, 0.6,
                                 (0, 255, 0), 1)
                 cv2.putText(status, "Press R to stop", (220, 340),
@@ -1229,7 +1527,13 @@ def main(args):
                 now = time.time()
                 if now - last_status_log >= 1.0 and session_start_time is not None:
                     elapsed = (datetime.now() - session_start_time).total_seconds()
-                    counts = ", ".join([f"cam{i+1}:{cam.frame_count}" for i, cam in enumerate(cameras)])
+                    counts = ", ".join([
+                        (
+                            f"cam{i+1}:{cam.writer_frame_count}"
+                            f"/drop:{cam.queue_drop_count}"
+                        )
+                        for i, cam in enumerate(cameras)
+                    ])
                     print(f"Recording... {elapsed:.1f}s | {counts}", end='\r', flush=True)
                     last_status_log = now
 
@@ -1241,6 +1545,14 @@ def main(args):
 
             if key == ord('c') and args.calib_check and not is_recording:
                 run_precheck_gate()
+                continue
+
+            if (
+                key in (ord('e'), ord('E'))
+                and args.calib_check
+                and not is_recording
+            ):
+                bypass_precheck_gate()
                 continue
 
             if key == ord('r'):

@@ -11,8 +11,11 @@ raw camera information matters more than file size.
 Each session is written under:
 
 ```text
-recordings/session_YYYYMMDD_HHMMSS/
+recordings/session_YYYY-MM-DD_HH:MM/
 ```
+
+If another recording starts during the same minute, the recorder appends
+`_02`, `_03`, and so on instead of reusing an existing directory.
 
 Each camera folder contains:
 
@@ -116,6 +119,10 @@ source depth
 
 The checker measures bidirectional median/P75 depth disagreement, inlier ratio,
 and common depth support. It never runs ICP and never changes the calibration.
+If one projection direction passes while the reverse direction contains
+non-mutual or occluded surfaces, the pair is reported as a visibility warning
+rather than a rigid-transform failure. A bidirectional outlier remains a real
+calibration failure and blocks recording.
 `PASS` and a connected-graph `WARN` unlock recording; severe mismatch or a
 disconnected camera blocks it.
 
@@ -146,8 +153,15 @@ Controls:
 ```text
 C  capture a short static depth burst and run the PCL check
 R  start recording only after PASS/WARN
+E  Executive bypass: skip the check and unlock R for engineering captures
 Q  quit
 ```
+
+Sessions unlocked with `E` store
+`calibration_precheck.status = "bypassed"` in `metadata.json`. This keeps quick
+engineering captures distinguishable from sessions that passed the scientific
+pre-check. After each recording, the gate locks again and requires either `C`
+or `E`.
 
 Keep people, chairs, and tabletop objects still for about one second while
 pressing `C`. No point cloud, image, or log file is written by the check.
@@ -194,6 +208,39 @@ connected.
 python3 -m pip install -r usta_pose/devel/record/requirements.txt
 ```
 
+## FPS Diagnostics
+
+`frame_timing_summary.json` separates camera-side capture rate from saved video
+rate and records queue drops, duplicate frame numbers, maximum writer queue
+depth, FFmpeg errors, USB type, and physical USB port. The
+`bottleneck_diagnosis` field distinguishes camera/USB capture loss from
+encoder/disk backpressure.
+
+These diagnostics do not change the scientific recording path. Every camera
+still writes `color.mkv` as FFV1/bgr0 and `depth.mkv` as FFV1/gray16le. Frame
+numbers that repeat are counted for diagnosis but are not removed from the
+recording.
+
+The main summary fields mean:
+
+```text
+camera_frame_fps_avg             unique RealSense frame numbers on hardware time
+sdk_delivery_fps_avg             all framesets returned to Python on host time
+saved_fps_avg                    paired color/depth frames successfully written
+queue_dropped_frames             frames rejected because the 90-frame writer queue filled
+max_writer_queue_depth           highest observed queue occupancy
+duplicate_frame_numbers_observed repeated RealSense frame numbers; frames are retained
+writer_error                     FFmpeg/pipe failure, otherwise null
+bottleneck_diagnosis             likely capture/USB, writer/disk, combined, or none
+```
+
+`camera_usb_or_capture_side` points to the camera/USB/host-controller side:
+inspect USB 3 mode, physical port/controller distribution, cable quality,
+power, and RealSense warnings. `encoder_or_disk_backpressure` means capture was
+healthy but the unchanged eight-stream FFV1 writer path could not drain its
+queue fast enough; use a faster recording disk or a stronger recording PC
+rather than changing the master codec.
+
 ## Downstream Note
 
 The existing revised processing scripts currently look for `camX/color.mp4`.
@@ -209,8 +256,8 @@ lossy unless a separate lossless codec/container path is used.
 After a short test recording, verify the streams with `ffprobe`:
 
 ```bash
-ffprobe -hide_banner recordings/session_YYYYMMDD_HHMMSS/cam1/color.mkv
-ffprobe -hide_banner recordings/session_YYYYMMDD_HHMMSS/cam1/depth.mkv
+ffprobe -hide_banner 'recordings/session_YYYY-MM-DD_HH:MM/cam1/color.mkv'
+ffprobe -hide_banner 'recordings/session_YYYY-MM-DD_HH:MM/cam1/depth.mkv'
 ```
 
 Expected result:

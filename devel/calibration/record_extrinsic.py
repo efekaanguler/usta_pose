@@ -373,6 +373,17 @@ def run_cube_camera_group_capture(
     window_name = f"AprilTag Cube Extrinsic Capture | {camera_label}"
     if not args.no_gui:
         cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+        try:
+            cv2.setWindowProperty(
+                window_name,
+                cv2.WND_PROP_FULLSCREEN,
+                cv2.WINDOW_FULLSCREEN,
+            )
+        except cv2.error:
+            print(
+                "[GUI] Full-screen mode is unavailable; "
+                "using a resizable window."
+            )
 
     print(f"\n[record_extrinsic] AprilTag cube session: {camera_label}")
     print(f"  Cube layout: {args.cube_layout}")
