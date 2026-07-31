@@ -52,6 +52,7 @@ class AlignmentCheckResult:
     pairs: tuple
     failed_pairs: tuple
     warning_pairs: tuple
+    skipped_pairs: tuple
     disconnected_cameras: tuple
 
 
@@ -464,38 +465,87 @@ class PCLAlignmentChecker:
             inlier_ratio=float(np.mean(residuals <= inlier_threshold)),
         )
 
-    def _grade_pair(self, forward, reverse):
-        directions = (forward, reverse)
-        if any(
+    def _grade_direction(self, metrics):
+        if (
             metrics.compared_points < self.min_compared_points
             or metrics.overlap_ratio < self.min_overlap_ratio
-            for metrics in directions
         ):
-            return "FAIL", "insufficient common depth support"
-
-        median_mm = max(metrics.median_mm for metrics in directions)
-        p75_mm = max(metrics.p75_mm for metrics in directions)
-        inlier_ratio = min(metrics.inlier_ratio for metrics in directions)
+            return "SKIP"
 
         if (
-            median_mm <= self.pass_median_mm
-            and p75_mm <= self.pass_p75_mm
-            and inlier_ratio >= self.pass_inlier_ratio
+            metrics.median_mm <= self.pass_median_mm
+            and metrics.p75_mm <= self.pass_p75_mm
+            and metrics.inlier_ratio >= self.pass_inlier_ratio
         ):
-            return "PASS", "depth surfaces agree"
+            return "PASS"
 
         if (
-            median_mm <= self.warn_median_mm
-            and p75_mm <= self.warn_p75_mm
-            and inlier_ratio >= self.warn_inlier_ratio
+            metrics.median_mm <= self.warn_median_mm
+            and metrics.p75_mm <= self.warn_p75_mm
+            and metrics.inlier_ratio >= self.warn_inlier_ratio
         ):
-            return "WARN", "usable but close to the tolerance boundary"
+            return "WARN"
+
+        return "OUTLIER"
+
+    def _grade_pair(self, forward, reverse):
+        forward_status = self._grade_direction(forward)
+        reverse_status = self._grade_direction(reverse)
+        direction_statuses = (forward_status, reverse_status)
+
+        if direction_statuses == ("PASS", "PASS"):
+            return "PASS", "depth surfaces agree in both projection directions"
+
+        if "SKIP" in direction_statuses:
+            supported_status = (
+                reverse_status if forward_status == "SKIP" else forward_status
+            )
+            if supported_status in ("PASS", "WARN"):
+                return (
+                    "WARN",
+                    (
+                        "only one projection direction has sufficient common "
+                        f"surface support ({forward_status}/{reverse_status})"
+                    ),
+                )
+            return (
+                "SKIP",
+                (
+                    "insufficient bidirectional common depth support "
+                    f"({forward_status}/{reverse_status})"
+                ),
+            )
+
+        if "OUTLIER" in direction_statuses:
+            if "PASS" in direction_statuses:
+                return (
+                    "WARN",
+                    (
+                        "one direction agrees while the opposite projection "
+                        "contains non-mutual/occluded surfaces; treated as "
+                        "visibility asymmetry, not a rigid-transform failure "
+                        f"({forward_status}/{reverse_status})"
+                    ),
+                )
+
+            median_mm = max(forward.median_mm, reverse.median_mm)
+            p75_mm = max(forward.p75_mm, reverse.p75_mm)
+            inlier_ratio = min(forward.inlier_ratio, reverse.inlier_ratio)
+            return (
+                "OUTLIER",
+                (
+                    "bidirectional depth mismatch "
+                    f"({forward_status}/{reverse_status}): "
+                    f"median={median_mm:.1f}mm, p75={p75_mm:.1f}mm, "
+                    f"inlier={inlier_ratio:.0%}"
+                ),
+            )
 
         return (
-            "FAIL",
+            "WARN",
             (
-                f"depth mismatch: median={median_mm:.1f}mm, "
-                f"p75={p75_mm:.1f}mm, inlier={inlier_ratio:.0%}"
+                "depth surfaces remain usable but at least one projection "
+                f"direction is close to tolerance ({forward_status}/{reverse_status})"
             ),
         )
 
@@ -517,6 +567,19 @@ class PCLAlignmentChecker:
                     visited.add(camera_a)
                     changed = True
         return tuple(sorted(camera_ids - visited))
+
+    @staticmethod
+    def _grade_overall(
+        failed_pairs,
+        warning_pairs,
+        skipped_pairs,
+        disconnected_cameras,
+    ):
+        if failed_pairs or disconnected_cameras:
+            return "FAIL"
+        if warning_pairs or skipped_pairs:
+            return "WARN"
+        return "PASS"
 
     def check(self, depth_frames_by_camera, camera_models):
         required_camera_ids = sorted(
@@ -585,7 +648,7 @@ class PCLAlignmentChecker:
         accepted_pairs = [
             (pair.camera_a, pair.camera_b)
             for pair in pair_results
-            if pair.status != "FAIL"
+            if pair.status in ("PASS", "WARN")
         ]
         disconnected = self._disconnected_cameras(
             required_camera_ids, accepted_pairs
@@ -593,21 +656,25 @@ class PCLAlignmentChecker:
         failed_pairs = tuple(
             (pair.camera_a, pair.camera_b)
             for pair in pair_results
-            if pair.status == "FAIL"
+            if pair.status == "OUTLIER"
         )
         warning_pairs = tuple(
             (pair.camera_a, pair.camera_b)
             for pair in pair_results
             if pair.status == "WARN"
         )
+        skipped_pairs = tuple(
+            (pair.camera_a, pair.camera_b)
+            for pair in pair_results
+            if pair.status == "SKIP"
+        )
 
-        max_tolerated_failed_edges = 1
-        if disconnected or len(failed_pairs) > max_tolerated_failed_edges:
-            status = "FAIL"
-        elif failed_pairs or warning_pairs:
-            status = "WARN"
-        else:
-            status = "PASS"
+        status = self._grade_overall(
+            failed_pairs,
+            warning_pairs,
+            skipped_pairs,
+            disconnected,
+        )
 
         return AlignmentCheckResult(
             status=status,
@@ -615,6 +682,7 @@ class PCLAlignmentChecker:
             pairs=tuple(pair_results),
             failed_pairs=failed_pairs,
             warning_pairs=warning_pairs,
+            skipped_pairs=skipped_pairs,
             disconnected_cameras=disconnected,
         )
 
@@ -624,6 +692,8 @@ class PCLAlignmentChecker:
             "PASS": "\033[1;32m",
             "WARN": "\033[1;33m",
             "FAIL": "\033[1;31m",
+            "SKIP": "\033[1;36m",
+            "OUTLIER": "\033[1;31m",
         }
         reset = "\033[0m"
         print("\nDepth/PCL camera-pair consistency:")
@@ -639,6 +709,8 @@ class PCLAlignmentChecker:
                 f"inlier {forward.inlier_ratio:.0%}/{reverse.inlier_ratio:.0%} | "
                 f"support {forward.compared_points}/{reverse.compared_points}"
             )
+            if pair.status != "PASS":
+                print(f"       {pair.reason}")
 
         color = colors[result.status]
         print(f"\n{color}{'=' * 72}")
@@ -646,8 +718,8 @@ class PCLAlignmentChecker:
             print("PCL ALIGNMENT OK: camera depth surfaces agree.")
         elif result.status == "WARN":
             print(
-                "PCL ALIGNMENT WARNING: usable, but recheck camera stability "
-                "and scene motion."
+                "PCL ALIGNMENT OK WITH WARNING: all cameras remain connected "
+                "through accepted overlap pairs."
             )
         else:
             print(
@@ -656,9 +728,14 @@ class PCLAlignmentChecker:
             )
         print(f"{'=' * 72}{reset}")
         if result.failed_pairs:
-            print(f"Failed pairs: {list(result.failed_pairs)}")
+            print(f"Blocking bidirectional outlier pairs: {list(result.failed_pairs)}")
         if result.warning_pairs:
             print(f"Warning pairs: {list(result.warning_pairs)}")
+        if result.skipped_pairs:
+            print(
+                "Skipped low-overlap pairs (not calibration failures): "
+                f"{list(result.skipped_pairs)}"
+            )
         if result.disconnected_cameras:
             print(
                 "Cameras disconnected from the accepted calibration graph: "
