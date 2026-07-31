@@ -1019,7 +1019,7 @@ def main(args):
             print("\n\033[1;33mRecord locked: press C and get calibration OK before pressing R.\033[0m")
             return False
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M")
         session_dir = str(output_base / f"session_{timestamp}")
         os.makedirs(session_dir, exist_ok=True)
         session_calibration_path = copy_latest_calibration_to_session(session_dir, output_base)
@@ -1053,7 +1053,7 @@ def main(args):
             fc, ts = cam.stop_recording()
             frame_counts[cam.cam_idx + 1] = fc
             all_timestamps[cam.cam_idx + 1] = ts
-
+calib_precheck_ok
         session_record_end = datetime.now()
 
         metadata = {
