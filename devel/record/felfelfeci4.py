@@ -203,6 +203,7 @@ class CameraThread:
         self.session_dir = None
         self.frame_count = 0
         self.capture_count = 0
+        self._raw_frame_count = 0  # every delivered frame, regardless of recording state
         self.writer_frame_count = 0
         self.queue_drop_count = 0
         self.duplicate_frame_count = 0
@@ -241,6 +242,22 @@ class CameraThread:
             'rotation': list(extr.rotation),
             'translation': list(extr.translation),
         }
+
+    def hardware_reset_only(self):
+        """Send hardware_reset to this camera's device without starting the pipeline.
+
+        Call this in parallel across all cameras so all devices re-enumerate
+        simultaneously.  Then call start() for each camera sequentially so
+        pipeline.start() calls are staggered and don't race for USB bandwidth.
+        """
+        try:
+            ctx = rs.context()
+            for dev in ctx.query_devices():
+                if dev.get_info(rs.camera_info.serial_number) == self.serial:
+                    dev.hardware_reset()
+                    return
+        except Exception:
+            pass
 
     def start(self):
         """Initialize RealSense pipeline and start capture thread."""
@@ -327,11 +344,30 @@ class CameraThread:
             'depth_scale_meters_per_unit': self.depth_scale,
         }
 
-        # Warm up: flush enough frames so AE converges before the capture loop
-        # starts.  15 was too few — AE was still adjusting when recording began,
-        # causing the first ~0.5s to run at a lower frame rate on some units.
-        for _ in range(30):
-            self.pipeline.wait_for_frames()
+        # Warm up: flush frames until the frame interval stabilises at target FPS.
+        # Uses a rolling window; once all intervals in the window are within the
+        # tolerance band we declare AE converged.  A ±15% tolerance (28–38ms at
+        # 30fps) is tight enough to ensure the sensor has genuinely settled
+        # before the capture loop starts.  Cap at 150 frames (~5s) to avoid
+        # hanging if a camera is pathologically unstable.
+        target_interval_ms = 1000.0 / self.fps
+        tol = target_interval_ms * 0.15   # ±15% → ~28.3–38.3ms for 30fps
+        win_size = 10
+        window = []
+        prev_ts = None
+        for _ in range(150):
+            f = self.pipeline.wait_for_frames(timeout_ms=2000)
+            ts = f.get_timestamp()
+            if prev_ts is not None:
+                dt = ts - prev_ts
+                window.append(dt)
+                if len(window) > win_size:
+                    window.pop(0)
+                if (len(window) == win_size
+                        and sum(abs(d - target_interval_ms) < tol
+                                for d in window) >= win_size - 2):
+                    break
+            prev_ts = ts
 
         self.running = True
         self.thread = threading.Thread(target=self._capture_loop, daemon=True)
@@ -372,6 +408,7 @@ class CameraThread:
                 frames = self.pipeline.wait_for_frames(timeout_ms=1000)
             except RuntimeError:
                 continue
+            self._raw_frame_count += 1
 
             # ── Capture host timestamp immediately after frame arrival ──
             host_ts = time.perf_counter() * 1000.0  # ms with µs precision
@@ -584,6 +621,7 @@ class CameraThread:
 
         self.frame_count = 0
         self.capture_count = 0
+        self._raw_frame_count = 0
         self.writer_frame_count = 0
         self.queue_drop_count = 0
         self.duplicate_frame_count = 0
@@ -806,8 +844,16 @@ def generate_frame_timing_report(
                 1, int(stats.get("writer_queue_capacity", 1))
             )
             max_queue_depth = int(stats.get("max_writer_queue_depth", 0))
-            writer_problem = bool(
+            # A writer_error caused solely by SIGINT/SIGTERM closing the FFmpeg
+            # pipe during shutdown is not a real disk/encoder bottleneck.
+            # Filter it out so the diagnosis reflects actual recording health.
+            shutdown_error = bool(
                 writer_error
+                and any(s in str(writer_error) for s in
+                        ("return code 255", "BrokenPipe", "pipe closed"))
+            )
+            writer_problem = bool(
+                (writer_error and not shutdown_error)
                 or queue_drops
                 or written_frames < queued_frames
             )
@@ -1199,6 +1245,25 @@ def main(args):
         cam.record_barrier = record_barrier
 
     print(f"\nStarting {num_cameras} camera streams...")
+    # Phase 1: send hardware_reset to ALL cameras in parallel.
+    # This clears any stale ASIC state left by a previous saturated session
+    # and kicks off USB re-enumeration simultaneously on all devices, so they
+    # all re-enumerate roughly at the same time instead of back-to-back.
+    print("  [reset] sending hardware_reset to all cameras in parallel...")
+    reset_threads = [threading.Thread(target=cam.hardware_reset_only) for cam in cameras]
+    for t in reset_threads:
+        t.start()
+    for t in reset_threads:
+        t.join()
+    # Wait for all devices to finish re-enumeration before opening any pipeline.
+    time.sleep(3.5)
+
+    # Phase 2: open all pipelines in parallel.
+    # All cameras request their isochronous USB slots simultaneously, giving
+    # the xHCI controller a fair view of total load from the start.  Sequential
+    # start causes earlier cameras to monopolise scheduling slots, leaving later
+    # cameras (cam3/cam4) with whatever remains — consistently ~22fps instead
+    # of 30fps.  Parallel start avoids this unfair allocation.
     start_threads = [threading.Thread(target=cam.start) for cam in cameras]
     for t in start_threads:
         t.start()
@@ -1212,7 +1277,9 @@ def main(args):
             f"USB {connection} | {port}"
         )
 
-    time.sleep(0.5)  # Let capture threads stabilize
+    # Let capture threads run for a short window so the USB isochronous slots
+    # finish negotiating across all 4 cameras before recording starts.
+    time.sleep(1.5)
 
     if args.pcl_check_only:
         print("\nRunning one PCL alignment check, then exiting...")
