@@ -22,7 +22,7 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=20260803-2" />
+    <link rel="stylesheet" href="./styles.css?v=20260803-3" />
   </head>
   <body>
     <div class="grain" aria-hidden="true"></div>
@@ -120,8 +120,8 @@
             </div>
             <div class="board" id="board" aria-label="3 satır 6 sütundan oluşan ortak oyun tahtası"></div>
             <div class="board-legend">
-              <span id="aLegend"><i class="legend-a"></i>A · bonus hücresi</span>
-              <span id="bLegend"><i class="legend-b"></i>B · bonus hücresi</span>
+              <span id="aLegend"><i class="legend-a"></i>A · puan hücresi</span>
+              <span id="bLegend"><i class="legend-b"></i>B · puan hücresi</span>
               <span><i class="legend-n"></i>N · nötr hücre</span>
               <span><i class="legend-special">Ö</i>Özel pul · sahibi sabit</span>
             </div>
@@ -205,16 +205,10 @@
             <span>Önce bir A/B hücresi seçin.</span>
           </div>
 
-          <label class="physical-complete-toggle">
-            <input id="physicalComplete" type="checkbox" checked />
-            <span><b>Tahta tamamlandı</b><small>İki oyuncuya da ortak +20 ekle</small></span>
-            <i>+20</i>
-          </label>
-
           <div class="physical-result">
-            <div class="physical-result-player p1"><small id="physicalNameP1">Oyuncu 1</small><strong id="physicalScoreP1">20</strong><span id="physicalDetailP1">Hedef 0 + ortak 20</span></div>
+            <div class="physical-result-player p1"><small id="physicalNameP1">Oyuncu 1</small><strong id="physicalScoreP1">0</strong><span id="physicalDetailP1">Hedef puanı: 0</span></div>
             <div class="physical-result-vs">—</div>
-            <div class="physical-result-player p2"><small id="physicalNameP2">Oyuncu 2</small><strong id="physicalScoreP2">20</strong><span id="physicalDetailP2">Hedef 0 + ortak 20</span></div>
+            <div class="physical-result-player p2"><small id="physicalNameP2">Oyuncu 2</small><strong id="physicalScoreP2">0</strong><span id="physicalDetailP2">Hedef puanı: 0</span></div>
           </div>
 
           <div class="physical-actions">
@@ -233,7 +227,7 @@
         <li><b>01</b><span><strong>Zinciri ilerlet</strong>Her satır fiziksel olarak soldan sağa ilerler. İkinci satır 6→5→4→3→2→1 dizilimindedir; disk yine hücrede yazan sayıyla eşleşir.</span></li>
         <li><b>02</b><span><strong>Özel kilidi aç</strong>A/B/N düzeni bütün tahtada geçerlidir. Yalnızca 3A, 4B, 5A ve 6B hücrelerindeki Özel P1/P2 pulları sabittir; bu hücreleri pulun sahibi tamamlar.</span></li>
         <li><b>03</b><span><strong>Puan diske gider</strong>Normal hamlelerde oyuncu pulu bırakılmaz. Diski kim koyarsa koysun, A/B hücresindeki şekil hangi gizli kitapçıkla eşleşiyorsa puanı o oyuncu alır. Özel hücrelerde de şekil serbesttir.</span></li>
-        <li><b>04</b><span><strong>İki hamlede devret</strong>Bir oyuncu üst üste en fazla iki disk koyabilir; ardından karşı oyuncu en az bir disk koymalıdır. Takas bu sayacı sıfırlamaz. 18 hücre tamamlanınca iki oyuncu da +20 alır.</span></li>
+        <li><b>04</b><span><strong>İki hamlede devret</strong>Bir oyuncu üst üste en fazla iki disk koyabilir; ardından karşı oyuncu en az bir disk koymalıdır. Takas bu sayacı sıfırlamaz.</span></li>
       </ol>
       <button class="primary-button" data-close type="button">Anladım, başlayalım</button>
     </dialog>
@@ -259,11 +253,10 @@
         <div class="score-vs">—</div>
         <div class="score-player p2"><small id="scoreNameP2">Oyuncu 2</small><strong id="scoreP2">0</strong><span id="scoreDetailP2">Hedef puanı: 0</span></div>
       </div>
-      <div class="completion-bonus" id="completionBonus"><span>+20</span><div><strong>Ortak tamamlama bonusu</strong><small>18 hücre dolduğunda iki oyuncuya da eklenir.</small></div></div>
       <button class="primary-button" data-close type="button">Oyuna dön</button>
       <button class="text-button" id="newGameButton" type="button">Yeni oyun kur</button>
     </dialog>
 
-    <script src="./app.js?v=20260803-5"></script>
+    <script src="./app.js?v=20260803-10"></script>
   </body>
 </html>

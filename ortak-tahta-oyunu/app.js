@@ -55,7 +55,6 @@ let physicalScoreState = {
   detectionConfidence: Array(18).fill(null),
   detections: [],
   selectedCell: null,
-  complete: true,
   photoUrl: null,
   rotation: 0,
   analyzing: false
@@ -199,8 +198,8 @@ function renderPlayers() {
   $("#p2Display").textContent = state.names.P2;
   $("#targetP1").innerHTML = targetHtml(state.targets.P1, "P1");
   $("#targetP2").innerHTML = targetHtml(state.targets.P2, "P2");
-  $("#aLegend").innerHTML = `<i class="legend-a"></i>A · bonus hücresi`;
-  $("#bLegend").innerHTML = `<i class="legend-b"></i>B · bonus hücresi`;
+  $("#aLegend").innerHTML = `<i class="legend-a"></i>A · puan hücresi`;
+  $("#bLegend").innerHTML = `<i class="legend-b"></i>B · puan hücresi`;
   ["P1", "P2"].forEach(player => {
     const active = state.activePlayer === player;
     const waiting = consecutivePlacementCount(player) >= 2;
@@ -289,7 +288,7 @@ function placeDisk(cellIndex) {
   sound("place");
   render();
   if (filled === 18) {
-    showToast("Tahta tamamlandı — iki oyuncuya da +20!");
+    showToast("Tahta tamamlandı — puanlar hazır!");
     setTimeout(() => openScore(true), 550);
   } else if (mustYield) {
     showToast(`${state.names[placedBy]} iki disk koydu; sıra ${state.names[state.activePlayer]}’da.`);
@@ -361,16 +360,13 @@ function openScore(forceReveal = false) {
   const complete = state.board.every(Boolean);
   const p1Target = calculateScore("P1");
   const p2Target = calculateScore("P2");
-  const bonus = complete ? 20 : 0;
   $("#scoreTitle").textContent = complete ? "Üç zincir tamamlandı!" : "Puanlar hâlâ gizli";
   $("#scoreNameP1").textContent = state.names.P1;
   $("#scoreNameP2").textContent = state.names.P2;
-  $("#scoreP1").textContent = complete ? p1Target + bonus : "?";
-  $("#scoreP2").textContent = complete ? p2Target + bonus : "?";
-  $("#scoreDetailP1").textContent = complete ? `Hedef ${p1Target} + ortak 20` : "Oyun sonunda açıklanır";
-  $("#scoreDetailP2").textContent = complete ? `Hedef ${p2Target} + ortak 20` : "Oyun sonunda açıklanır";
-  $("#completionBonus").classList.toggle("earned", complete);
-  $("#completionBonus small").textContent = complete ? "Kazanıldı — iki skora da eklendi." : "Üç zincir tamamlandığında iki oyuncuya da eklenir.";
+  $("#scoreP1").textContent = complete ? p1Target : "?";
+  $("#scoreP2").textContent = complete ? p2Target : "?";
+  $("#scoreDetailP1").textContent = complete ? `Hedef puanı: ${p1Target}` : "Oyun sonunda açıklanır";
+  $("#scoreDetailP2").textContent = complete ? `Hedef puanı: ${p2Target}` : "Oyun sonunda açıklanır";
   $("#scoreDialog").showModal();
   if (forceReveal) sound("finish");
 }
@@ -437,21 +433,19 @@ function renderPhysicalResult() {
   }).length;
   const p1Target = physicalTargetScore("P1");
   const p2Target = physicalTargetScore("P2");
-  const bonus = physicalScoreState.complete ? 20 : 0;
   $("#physicalProgress").textContent = `${assignedCount} / ${scoreableCount} işlendi`;
   $("#physicalNameP1").textContent = physicalScoreState.names.P1;
   $("#physicalNameP2").textContent = physicalScoreState.names.P2;
-  $("#physicalScoreP1").textContent = p1Target + bonus;
-  $("#physicalScoreP2").textContent = p2Target + bonus;
-  $("#physicalDetailP1").textContent = `Hedef ${p1Target}${bonus ? " + ortak 20" : ""}`;
-  $("#physicalDetailP2").textContent = `Hedef ${p2Target}${bonus ? " + ortak 20" : ""}`;
+  $("#physicalScoreP1").textContent = p1Target;
+  $("#physicalScoreP2").textContent = p2Target;
+  $("#physicalDetailP1").textContent = `Hedef puanı: ${p1Target}`;
+  $("#physicalDetailP2").textContent = `Hedef puanı: ${p2Target}`;
 }
 
 function renderPhysicalScore() {
   $("#physicalScenario").value = String(physicalScoreState.scenario);
   $("#physicalP1Name").value = physicalScoreState.names.P1;
   $("#physicalP2Name").value = physicalScoreState.names.P2;
-  $("#physicalComplete").checked = physicalScoreState.complete;
   renderPhysicalBoard();
   renderPhysicalShapePicker();
   renderPhysicalResult();
@@ -631,11 +625,9 @@ function findColoredDiskComponents(context) {
   }
   const selected = DETECTABLE_COLORS.flatMap(color => components.filter(component => component.color === color).sort((a, b) => b.area - a.area).slice(0, 2));
   const counts = Object.fromEntries(DETECTABLE_COLORS.map(color => [color, selected.filter(component => component.color === color).length]));
-  if (Object.values(counts).some(count => count !== 2)) {
-    const found = Object.values(counts).reduce((sum, count) => sum + count, 0);
-    throw new Error(`12 renkli diskten ${found} tanesi net bulundu. Işığı artırıp tahtayı biraz daha tepeden çekin.`);
-  }
-  return { components: selected, image };
+  const found = Object.values(counts).reduce((sum, count) => sum + count, 0);
+  if (found < 3) throw new Error(`12 renkli diskten yalnızca ${found} tanesi bulundu. Işığı artırıp tahtayı biraz daha tepeden çekin.`);
+  return { components: selected, image, found };
 }
 
 function columnCombinations(size, choose, start = 0, prefix = []) {
@@ -690,7 +682,7 @@ function mapColoredDisksToGrid(components) {
   const ranked = combinations.map(choice => {
     const colorNumbers = Object.fromEntries(DETECTABLE_COLORS.map(color => [color, []]));
     choice.forEach((option, rowIndex) => option.points.forEach(point => colorNumbers[point.color].push(BOARD_NUMBERS[rowIndex][point.column])));
-    if (Object.values(colorNumbers).some(numbers => numbers.length !== 2 || numbers[0] === numbers[1])) return null;
+    if (Object.values(colorNumbers).some(numbers => new Set(numbers).size !== numbers.length)) return null;
     const directFits = choice.map(option => option.points.length > 1 ? linearFit(option.points, "x") : null);
     const slopes = directFits.filter(Boolean).map(fit => fit.slope).filter(slope => slope > 0).sort((a, b) => a - b);
     if (!slopes.length) return null;
@@ -730,7 +722,7 @@ function sampleCellBrightness(image, center, radius) {
 function detectPhysicalBoard() {
   const canvas = $("#physicalPhotoCanvas");
   const context = canvas.getContext("2d", { willReadFrequently: true });
-  const { components, image } = findColoredDiskComponents(context);
+  const { components, image, found } = findColoredDiskComponents(context);
   const fittedRows = mapColoredDisksToGrid(components);
   const centers = fittedRows.flatMap((row, rowIndex) => Array.from({ length: 6 }, (_, column) => ({
     index: rowIndex * 6 + column,
@@ -742,7 +734,7 @@ function detectPhysicalBoard() {
     radius: Math.abs(row.xFit.slope) * .42
   })));
   const assignments = Array(18).fill(null);
-  const confidences = Array(18).fill(.82);
+  const confidences = Array(18).fill(null);
   fittedRows.forEach((row, rowIndex) => row.points.forEach(point => {
     const index = rowIndex * 6 + point.column;
     assignments[index] = DISKS.find(disk => disk.color === point.color && disk.number === cellNumber(index));
@@ -756,8 +748,11 @@ function detectPhysicalBoard() {
     if (numberCells.length !== remaining.length) throw new Error(`${number} numaralı diskler tekil olarak eşleştirilemedi.`);
     if (numberCells.length === 1) {
       assignments[numberCells[0].index] = remaining[0];
+      confidences[numberCells[0].index] = .68;
       continue;
     }
+    const neutralColors = new Set(["Siyah", "Gri", "Beyaz"]);
+    if (!remaining.every(disk => neutralColors.has(disk.color))) continue;
     const cellsByBrightness = numberCells.map(center => ({ center, brightness: sampleCellBrightness(image, center, center.radius) })).sort((a, b) => a.brightness - b.brightness);
     const disksByBrightness = [...remaining].sort((a, b) => ({ Siyah: 0, Gri: 1, Beyaz: 2 }[a.color] ?? 3) - ({ Siyah: 0, Gri: 1, Beyaz: 2 }[b.color] ?? 3));
     cellsByBrightness.forEach((item, index) => {
@@ -765,15 +760,16 @@ function detectPhysicalBoard() {
       confidences[item.center.index] = Math.abs(cellsByBrightness[0].brightness - cellsByBrightness.at(-1).brightness) > 18 ? .72 : .28;
     });
   }
-  if (assignments.some(disk => !disk)) throw new Error("Bazı diskler sabit disk setiyle eşleştirilemedi.");
   return {
-    shapes: assignments.map(disk => disk.shape),
+    shapes: assignments.map(disk => disk?.shape || null),
     confidences,
-    detections: centers.map(center => ({ ...center, color: assignments[center.index].color, shape: assignments[center.index].shape }))
+    detectedColorCount: found,
+    assignedCount: assignments.filter(Boolean).length,
+    detections: centers.filter(center => assignments[center.index]).map(center => ({ ...center, color: assignments[center.index].color, shape: assignments[center.index].shape }))
   };
 }
 
-async function analyzePhysicalPhoto() {
+function analyzePhysicalPhoto() {
   if (!physicalScoreState.photoUrl || physicalScoreState.analyzing) return;
   physicalScoreState.analyzing = true;
   physicalScoreState.detections = [];
@@ -781,22 +777,30 @@ async function analyzePhysicalPhoto() {
   $("#photoAnalysisOverlay").classList.remove("hidden");
   setPhysicalAnalysisStatus("working", "Analiz ediliyor", "18 disk ve renkleri cihazınızda aranıyor…");
   try {
-    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const result = detectPhysicalBoard();
     physicalScoreState.shapes = result.shapes;
     physicalScoreState.detectionConfidence = result.confidences;
     physicalScoreState.detections = result.detections;
-    physicalScoreState.complete = result.shapes.every(Boolean);
     physicalScoreState.selectedCell = null;
-    const uncertain = result.confidences.filter(confidence => confidence < .34).length;
+    const uncertain = result.confidences.filter(confidence => confidence !== null && confidence < .34).length;
     renderPhysicalScore();
     drawPhysicalPhotoCanvas(true);
-    setPhysicalAnalysisStatus(
-      uncertain ? "warning" : "success",
-      "18 / 18 disk okundu",
-      uncertain ? `${uncertain} okuma mor renkle işaretlendi; puanı onaylamadan önce kontrol edin.` : "Tüm şekiller bulundu ve puanlar otomatik hesaplandı."
-    );
-    showToast("Fotoğraf otomatik okundu, puanlar hazır.");
+    const partial = result.assignedCount < 18;
+    if (partial) {
+      setPhysicalAnalysisStatus(
+        "warning",
+        `${result.assignedCount} / 18 disk yerleştirildi`,
+        `${result.detectedColorCount}/12 renkli disk net bulundu. Eksik A/B hücrelerini sağdaki tahtadan tamamlayın.`
+      );
+      showToast("Bulunan diskler yerleştirildi; eksikleri elle tamamlayabilirsiniz.");
+    } else {
+      setPhysicalAnalysisStatus(
+        uncertain ? "warning" : "success",
+        "18 / 18 disk okundu",
+        uncertain ? `${uncertain} okuma mor renkle işaretlendi; puanı onaylamadan önce kontrol edin.` : "Tüm şekiller bulundu ve puanlar otomatik hesaplandı."
+      );
+      showToast("Fotoğraf otomatik okundu, puanlar hazır.");
+    }
   } catch (error) {
     physicalScoreState.detections = [];
     physicalScoreState.detectionConfidence = Array(18).fill(null);
@@ -859,7 +863,6 @@ function resetPhysicalScore() {
   physicalScoreState.detectionConfidence = Array(18).fill(null);
   physicalScoreState.detections = [];
   physicalScoreState.selectedCell = null;
-  physicalScoreState.complete = true;
   clearPhysicalPhoto();
   renderPhysicalScore();
   showToast("Fiziksel puan formu temizlendi.");
@@ -868,9 +871,8 @@ function resetPhysicalScore() {
 async function copyPhysicalResult() {
   const p1Target = physicalTargetScore("P1");
   const p2Target = physicalTargetScore("P2");
-  const bonus = physicalScoreState.complete ? 20 : 0;
-  const assigned = physicalScoreState.shapes.filter(Boolean).length;
-  const text = `USTA fiziksel oturum · Senaryo ${physicalScoreState.scenario}\n${physicalScoreState.names.P1}: ${p1Target + bonus} (hedef ${p1Target}${bonus ? " + ortak 20" : ""})\n${physicalScoreState.names.P2}: ${p2Target + bonus} (hedef ${p2Target}${bonus ? " + ortak 20" : ""})\nİşlenen bonus hücresi: ${assigned}/12`;
+  const assigned = physicalScoreState.shapes.filter((shape, index) => shape && BOARD_TYPES[Math.floor(index / 6)][index % 6] !== "N").length;
+  const text = `USTA fiziksel oturum · Senaryo ${physicalScoreState.scenario}\n${physicalScoreState.names.P1}: ${p1Target}\n${physicalScoreState.names.P2}: ${p2Target}\nİşlenen puan hücresi: ${assigned}/12`;
   try {
     await navigator.clipboard.writeText(text);
   } catch (_) {
@@ -973,11 +975,6 @@ $("#physicalP1Name").addEventListener("input", event => {
 
 $("#physicalP2Name").addEventListener("input", event => {
   physicalScoreState.names.P2 = event.target.value.trim() || "Oyuncu 2";
-  renderPhysicalResult();
-});
-
-$("#physicalComplete").addEventListener("change", event => {
-  physicalScoreState.complete = event.target.checked;
   renderPhysicalResult();
 });
 

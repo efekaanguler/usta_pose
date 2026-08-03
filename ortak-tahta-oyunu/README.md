@@ -53,7 +53,8 @@ bir puan formu açar:
   anında hesaplanır. Düşük güvenli sonuçlar mor renkle gösterilir.
 - Gerekirse yalnızca hatalı A/B hücresine dokunup şekli düzeltmek mümkündür;
   normal akışta elle veri girişi gerekmez.
+- Renkli disklerin tamamı bulunamazsa analiz iptal edilmez: kesin bulunan diskler
+  tahtaya yazılır, kalan A/B hücreleri elle tamamlanabilir.
 - En iyi sonuç için 18 diskin tamamını kadraja alın, tahtayı dik tutun ve
   yansımayı azaltın.
-- Tahta tamamlanma durumu ortak +20 bonusunu açıp kapatır.
 - Sonuç panoya kopyalanabilir.

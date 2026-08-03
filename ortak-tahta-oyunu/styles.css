@@ -262,11 +262,6 @@ h1, h2 { font-family: "Space Grotesk", sans-serif; margin: 0; letter-spacing: -.
 .shape-option small { font-size: 8px; font-weight: 800; }
 .shape-option:hover { border-color: #745ca7; }
 .shape-option.clear { min-width: auto; color: var(--p2); }
-.physical-complete-toggle { min-height: 58px; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 11px; padding: 9px 13px; border: 1px dashed var(--gold); border-radius: 12px; background: #fffaf0; cursor: pointer; }
-.physical-complete-toggle input { width: 18px; height: 18px; accent-color: var(--gold); }
-.physical-complete-toggle > span { display: flex; flex-direction: column; }
-.physical-complete-toggle small { color: var(--muted); margin-top: 2px; }
-.physical-complete-toggle i { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 50%; background: var(--gold); font-style: normal; font-weight: 900; }
 .physical-result { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 10px; margin: 12px 0; }
 .physical-result-player { display: flex; flex-direction: column; align-items: center; padding: 13px; border-radius: 12px; background: var(--p1-soft); }
 .physical-result-player.p2 { background: var(--p2-soft); }
@@ -297,11 +292,6 @@ h1, h2 { font-family: "Space Grotesk", sans-serif; margin: 0; letter-spacing: -.
 .score-player.p2 strong { color: var(--p2); }
 .score-player span { color: var(--muted); font-size: 12px; }
 .score-vs { color: var(--muted); font-size: 25px; }
-.completion-bonus { display: flex; gap: 13px; align-items: center; padding: 15px; border: 1px dashed var(--gold); border-radius: 13px; margin-bottom: 20px; }
-.completion-bonus > span { display: grid; place-items: center; width: 53px; height: 53px; border-radius: 50%; background: var(--gold); font-weight: 900; }
-.completion-bonus div { display: flex; flex-direction: column; }
-.completion-bonus small { color: var(--muted); margin-top: 3px; }
-.completion-bonus.earned { background: #fbf1d4; border-style: solid; }
 .score-modal .text-button { display: block; margin: 8px auto 0; }
 .toast { position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 20px); background: var(--ink); color: white; border-radius: 99px; padding: 11px 18px; opacity: 0; pointer-events: none; transition: .25s; z-index: 20; font-weight: 700; font-size: 13px; box-shadow: var(--shadow); }
 .toast.show { opacity: 1; transform: translate(-50%,0); }
