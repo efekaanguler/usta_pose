@@ -22,7 +22,7 @@
       href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=20260803-1" />
+    <link rel="stylesheet" href="./styles.css?v=20260803-2" />
   </head>
   <body>
     <div class="grain" aria-hidden="true"></div>
@@ -156,8 +156,8 @@
       <div class="physical-header">
         <div>
           <p class="eyebrow"><span></span> FİZİKSEL OTURUM</p>
-          <h2>Fotoğraftan puanla</h2>
-          <p class="modal-copy">Fotoğraf yalnızca bu cihazda kalır. Şekil yüzleri görünürken çekilmiş bir masa fotoğrafı kullanın.</p>
+          <h2>Fotoğraftan otomatik puanla</h2>
+          <p class="modal-copy">Tahta ve 18 disk cihazınızda otomatik okunur; fotoğraf hiçbir sunucuya gönderilmez.</p>
         </div>
         <span class="privacy-badge">Yerel · yükleme yok</span>
       </div>
@@ -171,15 +171,21 @@
             <small>JPG, PNG veya WEBP · en fazla 20 MB</small>
           </label>
           <div class="photo-preview hidden" id="photoPreview">
-            <div class="photo-canvas"><img id="physicalPhoto" alt="Yüklenen fiziksel oyun tahtası" /></div>
+            <div class="photo-canvas">
+              <img class="hidden" id="physicalPhoto" alt="Yüklenen fiziksel oyun tahtası" />
+              <canvas id="physicalPhotoCanvas" aria-label="Otomatik algılanan fiziksel oyun tahtası"></canvas>
+              <div class="photo-analysis-overlay hidden" id="photoAnalysisOverlay"><i></i><strong>Tahta okunuyor…</strong></div>
+            </div>
             <div class="photo-tools">
               <button type="button" id="rotatePhotoLeft" aria-label="Fotoğrafı sola döndür">↶</button>
               <button type="button" id="rotatePhotoRight" aria-label="Fotoğrafı sağa döndür">↷</button>
+              <button class="analyze-photo" type="button" id="analyzePhysicalPhoto">Yeniden tara</button>
               <label for="physicalPhotoInput">Fotoğrafı değiştir</label>
               <button type="button" id="removePhoto">Kaldır</button>
             </div>
           </div>
-          <div class="photo-tip"><b>İpucu</b><span>Fotoğrafı referans alın; sağdaki A/B hücrelerine basıp gördüğünüz şekli işaretleyin.</span></div>
+          <div class="photo-analysis-status idle" id="physicalAnalysisStatus" role="status"><b>Hazır</b><span>Tahtayı yukarıdan, 18 diskin tamamı görünecek şekilde çekin.</span></div>
+          <div class="photo-tip"><b>Nasıl?</b><span>Disk rengi ve sabit hücre numarası birlikte okunur; şekil otomatik bulunur. Mor işaretli sonuçları gerekirse sağdan düzeltebilirsiniz.</span></div>
         </section>
 
         <section class="physical-score-sheet" aria-label="Fiziksel oturum puan formu">
@@ -190,7 +196,7 @@
           </div>
 
           <div class="physical-board-head">
-            <div><strong>Bonus hücreleri</strong><small>A/B hücresine dokun, şekli seç</small></div>
+            <div><strong>Otomatik okuma</strong><small>Bir hücreye dokunarak algılanan şekli düzeltebilirsiniz</small></div>
             <span id="physicalProgress">0 / 12 işlendi</span>
           </div>
           <div class="physical-board" id="physicalBoard" aria-label="Fotoğraf puanlama tahtası"></div>
@@ -258,6 +264,6 @@
       <button class="text-button" id="newGameButton" type="button">Yeni oyun kur</button>
     </dialog>
 
-    <script src="./app.js?v=20260803-1"></script>
+    <script src="./app.js?v=20260803-5"></script>
   </body>
 </html>

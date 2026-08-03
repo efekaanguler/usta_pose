@@ -209,13 +209,23 @@ h1, h2 { font-family: "Space Grotesk", sans-serif; margin: 0; letter-spacing: -.
 .photo-dropzone small { font-size: 12px; }
 .upload-icon { width: 58px; height: 58px; display: grid; place-items: center; border-radius: 50%; color: white; background: var(--p1); font-size: 32px; box-shadow: 5px 5px 0 var(--gold); }
 .photo-preview { border-radius: 18px; overflow: hidden; border: 1px solid var(--line); background: #1b262c; }
-.photo-canvas { min-height: 410px; height: min(56vh, 590px); display: grid; place-items: center; overflow: hidden; }
+.photo-canvas { position: relative; min-height: 410px; height: min(56vh, 590px); display: grid; place-items: center; overflow: hidden; }
 .photo-canvas img { display: block; max-width: 92%; max-height: 92%; object-fit: contain; transform: rotate(0deg); transition: transform .2s; }
+.photo-canvas canvas { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
+.photo-analysis-overlay { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 12px; color: white; background: rgba(19,42,56,.72); backdrop-filter: blur(3px); }
+.photo-analysis-overlay i { width: 38px; height: 38px; border: 4px solid rgba(255,255,255,.3); border-top-color: var(--gold); border-radius: 50%; animation: photo-spin .8s linear infinite; }
+@keyframes photo-spin { to { transform: rotate(360deg); } }
 .photo-tools { display: flex; align-items: center; gap: 7px; padding: 10px; background: var(--cream); }
 .photo-tools button, .photo-tools label { min-height: 36px; display: grid; place-items: center; padding: 0 11px; border: 1px solid var(--line); border-radius: 9px; background: white; cursor: pointer; font-size: 12px; font-weight: 800; }
 .photo-tools button:first-child, .photo-tools button:nth-child(2) { width: 38px; padding: 0; font-size: 18px; }
+.photo-tools .analyze-photo { color: white; background: var(--p1); border-color: var(--p1); }
 .photo-tools label { margin-left: auto; }
 .photo-tools #removePhoto { color: var(--p2); }
+.photo-analysis-status { display: grid; grid-template-columns: auto 1fr; gap: 9px; align-items: center; margin-top: 10px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 11px; color: var(--muted); background: var(--paper); font-size: 12px; }
+.photo-analysis-status b { color: var(--ink); }
+.photo-analysis-status.working { border-color: #d8b052; background: #fff8e6; }
+.photo-analysis-status.success { border-color: #a8cda6; background: #edf8ec; }
+.photo-analysis-status.warning { border-color: #e1a59f; background: #fff0ee; }
 .photo-tip { display: grid; grid-template-columns: auto 1fr; gap: 9px; margin-top: 10px; padding: 12px; border-radius: 11px; background: #fbf1d4; color: var(--muted); font-size: 12px; line-height: 1.4; }
 .photo-tip b { color: var(--ink); }
 .physical-settings { display: grid; grid-template-columns: .75fr 1fr 1fr; gap: 8px; margin-bottom: 16px; }
@@ -233,6 +243,9 @@ h1, h2 { font-family: "Space Grotesk", sans-serif; margin: 0; letter-spacing: -.
 .physical-cell:not(.type-N):hover { transform: translateY(-2px); border-color: var(--ink); }
 .physical-cell.selected { box-shadow: inset 0 0 0 3px #745ca7; }
 .physical-cell.assigned { border-color: rgba(19,42,56,.45); }
+.physical-cell.detected { box-shadow: inset 0 0 0 2px rgba(65,145,73,.28); }
+.physical-cell.uncertain { box-shadow: inset 0 0 0 3px #745ca7; }
+.physical-cell.uncertain::after { content: "?"; position: absolute; left: 5px; bottom: 4px; width: 15px; height: 15px; display: grid; place-items: center; border-radius: 50%; color: white; background: #745ca7; font-size: 9px; font-weight: 900; }
 .physical-cell .physical-cell-meta { position: absolute; left: 7px; top: 6px; display: flex; flex-direction: column; line-height: 1; }
 .physical-cell-meta b { font-family: "Space Grotesk"; font-size: 15px; }
 .physical-cell-meta small { margin-top: 3px; color: var(--muted); font-size: 7px; font-weight: 900; }

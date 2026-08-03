@@ -52,10 +52,13 @@ let physicalScoreState = {
   scenario: 1,
   names: { P1: "Oyuncu 1", P2: "Oyuncu 2" },
   shapes: Array(18).fill(null),
+  detectionConfidence: Array(18).fill(null),
+  detections: [],
   selectedCell: null,
   complete: true,
   photoUrl: null,
-  rotation: 0
+  rotation: 0,
+  analyzing: false
 };
 
 const $ = selector => document.querySelector(selector);
@@ -404,11 +407,13 @@ function renderPhysicalBoard() {
     const scoreable = type !== "N";
     const special = SPECIAL_CELLS[index];
     const owner = special ? physicalSpecialOwner(type) : null;
+    const confidence = physicalScoreState.detectionConfidence[index];
+    const detectionClass = confidence === null ? "" : confidence < .34 ? " uncertain" : " detected";
     const specialSeal = special ? `<span class="physical-special-seal ${owner.toLowerCase()}">Ö${owner}</span>` : "";
     const shapeContent = shape
       ? `<span class="physical-cell-shape"><strong>${SHAPE_ICONS[shape]}</strong><small>${shape}</small></span>`
       : scoreable ? `<span class="physical-cell-shape physical-cell-empty">＋</span>` : "";
-    return `<button class="physical-cell type-${type}${shape ? " assigned" : ""}${physicalScoreState.selectedCell === index ? " selected" : ""}" data-physical-cell="${index}" type="button" ${scoreable ? "" : "disabled"} aria-label="${number}${type}${shape ? `, ${shape}` : scoreable ? ", şekil seçilmedi" : ", nötr"}"><span class="physical-cell-meta"><b>${number}</b><small>${type}</small></span>${specialSeal}${shapeContent}</button>`;
+    return `<button class="physical-cell type-${type}${shape ? " assigned" : ""}${detectionClass}${physicalScoreState.selectedCell === index ? " selected" : ""}" data-physical-cell="${index}" type="button" ${scoreable ? "" : "disabled"} aria-label="${number}${type}${shape ? `, ${shape}` : scoreable ? ", şekil seçilmedi" : ", nötr"}"><span class="physical-cell-meta"><b>${number}</b><small>${type}</small></span>${specialSeal}${shapeContent}</button>`;
   }).join("");
 }
 
@@ -473,6 +478,7 @@ function selectPhysicalShape(shape) {
   const index = physicalScoreState.selectedCell;
   if (index === null) return;
   physicalScoreState.shapes[index] = shape || null;
+  physicalScoreState.detectionConfidence[index] = shape ? 1 : null;
   if (shape) {
     const scoreableCells = physicalScoreState.shapes
       .map((_, cellIndex) => cellIndex)
@@ -484,37 +490,374 @@ function selectPhysicalShape(shape) {
   renderPhysicalScore();
 }
 
+function setPhysicalAnalysisStatus(kind, title, detail) {
+  const status = $("#physicalAnalysisStatus");
+  status.className = `photo-analysis-status ${kind}`;
+  status.innerHTML = `<b>${escapeHtml(title)}</b><span>${escapeHtml(detail)}</span>`;
+}
+
+function drawPhysicalPhotoCanvas(showDetections = true) {
+  const image = $("#physicalPhoto");
+  const canvas = $("#physicalPhotoCanvas");
+  if (!image.naturalWidth) return;
+  const maxSide = 600;
+  const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
+  const sourceWidth = Math.round(image.naturalWidth * scale);
+  const sourceHeight = Math.round(image.naturalHeight * scale);
+  const sideways = physicalScoreState.rotation % 180 !== 0;
+  canvas.width = sideways ? sourceHeight : sourceWidth;
+  canvas.height = sideways ? sourceWidth : sourceHeight;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.save();
+  if (physicalScoreState.rotation === 90) {
+    context.translate(canvas.width, 0);
+    context.rotate(Math.PI / 2);
+  } else if (physicalScoreState.rotation === 180) {
+    context.translate(canvas.width, canvas.height);
+    context.rotate(Math.PI);
+  } else if (physicalScoreState.rotation === 270) {
+    context.translate(0, canvas.height);
+    context.rotate(-Math.PI / 2);
+  }
+  context.drawImage(image, 0, 0, sourceWidth, sourceHeight);
+  context.restore();
+
+  if (!showDetections || !physicalScoreState.detections.length) return;
+  context.save();
+  context.font = "700 12px DM Sans, sans-serif";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  physicalScoreState.detections.forEach(detection => {
+    const confidence = physicalScoreState.detectionConfidence[detection.index] ?? 0;
+    const color = confidence < .34 ? "#745ca7" : "#43a04d";
+    context.beginPath();
+    context.arc(detection.x, detection.y, detection.radius, 0, Math.PI * 2);
+    context.strokeStyle = color;
+    context.lineWidth = Math.max(3, canvas.width / 300);
+    context.stroke();
+    const label = `${detection.number} · ${SHAPE_ICONS[detection.shape] || "?"}`;
+    const width = context.measureText(label).width + 14;
+    const labelY = Math.max(13, detection.y - detection.radius - 11);
+    context.fillStyle = "rgba(19,42,56,.88)";
+    context.fillRect(detection.x - width / 2, labelY - 10, width, 20);
+    context.fillStyle = "white";
+    context.fillText(label, detection.x, labelY);
+  });
+  context.restore();
+}
+
+function rgbToHsv(red, green, blue) {
+  const r = red / 255;
+  const g = green / 255;
+  const b = blue / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const delta = max - min;
+  let hue = 0;
+  if (delta) {
+    if (max === r) hue = 60 * (((g - b) / delta) % 6);
+    else if (max === g) hue = 60 * ((b - r) / delta + 2);
+    else hue = 60 * ((r - g) / delta + 4);
+  }
+  if (hue < 0) hue += 360;
+  return { h: hue / 2, s: max ? (delta / max) * 255 : 0, v: max * 255 };
+}
+
+const DETECTABLE_COLORS = ["Kırmızı", "Turuncu", "Sarı", "Yeşil", "Mavi", "Lacivert"];
+
+function detectedColorForPixel(red, green, blue) {
+  const { h, s, v } = rgbToHsv(red, green, blue);
+  if ((h < 8 || h > 174) && s > 130 && v > 80) return 0;
+  if (h >= 8 && h < 18 && s > 160 && v > 120) return 1;
+  if (h >= 18 && h < 32 && s > 150 && v > 120) return 2;
+  if (h >= 42 && h < 80 && s > 90 && v > 70) return 3;
+  if (h >= 90 && h < 112 && s > 110 && v > 105) return 4;
+  if (h >= 108 && h < 145 && s > 65 && v < 155) return 5;
+  return -1;
+}
+
+function findColoredDiskComponents(context) {
+  const { width, height } = context.canvas;
+  const image = context.getImageData(0, 0, width, height);
+  const classes = new Int8Array(width * height);
+  classes.fill(-1);
+  for (let index = 0; index < width * height; index += 1) {
+    const offset = index * 4;
+    classes[index] = detectedColorForPixel(image.data[offset], image.data[offset + 1], image.data[offset + 2]);
+  }
+  const visited = new Uint8Array(classes.length);
+  const stack = new Int32Array(classes.length);
+  const components = [];
+  const minimumArea = width * height * .0024;
+  const maximumArea = width * height * .04;
+  for (let start = 0; start < classes.length; start += 1) {
+    const colorIndex = classes[start];
+    if (colorIndex < 0 || visited[start]) continue;
+    let stackSize = 1;
+    let area = 0;
+    let sumX = 0;
+    let sumY = 0;
+    let minX = width;
+    let maxX = 0;
+    let minY = height;
+    let maxY = 0;
+    stack[0] = start;
+    visited[start] = 1;
+    while (stackSize) {
+      const current = stack[--stackSize];
+      const x = current % width;
+      const y = Math.floor(current / width);
+      area += 1;
+      sumX += x;
+      sumY += y;
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+      const neighbors = [current - 1, current + 1, current - width, current + width];
+      neighbors.forEach((neighbor, direction) => {
+        if (neighbor < 0 || neighbor >= classes.length || visited[neighbor] || classes[neighbor] !== colorIndex) return;
+        if (direction === 0 && x === 0) return;
+        if (direction === 1 && x === width - 1) return;
+        visited[neighbor] = 1;
+        stack[stackSize++] = neighbor;
+      });
+    }
+    const boxWidth = maxX - minX + 1;
+    const boxHeight = maxY - minY + 1;
+    if (area < minimumArea || area > maximumArea || boxWidth < width * .035 || boxWidth > width * .19 || boxHeight < height * .035 || boxHeight > height * .21) continue;
+    components.push({ color: DETECTABLE_COLORS[colorIndex], x: sumX / area, y: sumY / area, area, boxWidth, boxHeight });
+  }
+  const selected = DETECTABLE_COLORS.flatMap(color => components.filter(component => component.color === color).sort((a, b) => b.area - a.area).slice(0, 2));
+  const counts = Object.fromEntries(DETECTABLE_COLORS.map(color => [color, selected.filter(component => component.color === color).length]));
+  if (Object.values(counts).some(count => count !== 2)) {
+    const found = Object.values(counts).reduce((sum, count) => sum + count, 0);
+    throw new Error(`12 renkli diskten ${found} tanesi net bulundu. Işığı artırıp tahtayı biraz daha tepeden çekin.`);
+  }
+  return { components: selected, image };
+}
+
+function columnCombinations(size, choose, start = 0, prefix = []) {
+  if (prefix.length === choose) return [prefix];
+  const combinations = [];
+  for (let value = start; value <= size - (choose - prefix.length); value += 1) {
+    combinations.push(...columnCombinations(size, choose, value + 1, [...prefix, value]));
+  }
+  return combinations;
+}
+
+function linearFit(points, coordinate) {
+  const count = points.length;
+  const meanColumn = points.reduce((sum, point) => sum + point.column, 0) / count;
+  const meanValue = points.reduce((sum, point) => sum + point[coordinate], 0) / count;
+  const denominator = points.reduce((sum, point) => sum + (point.column - meanColumn) ** 2, 0) || 1;
+  const slope = points.reduce((sum, point) => sum + (point.column - meanColumn) * (point[coordinate] - meanValue), 0) / denominator;
+  const intercept = meanValue - slope * meanColumn;
+  const error = points.reduce((sum, point) => sum + (point[coordinate] - (intercept + slope * point.column)) ** 2, 0) / count;
+  return { intercept, slope, error };
+}
+
+function mapColoredDisksToGrid(components) {
+  let centers = [Math.min(...components.map(disk => disk.y)), components.map(disk => disk.y).sort((a, b) => a - b)[Math.floor(components.length / 2)], Math.max(...components.map(disk => disk.y))];
+  let rows = [];
+  for (let iteration = 0; iteration < 12; iteration += 1) {
+    rows = [[], [], []];
+    components.forEach(disk => {
+      const distances = centers.map(center => Math.abs(disk.y - center));
+      const rowIndex = distances.indexOf(Math.min(...distances));
+      rows[rowIndex].push(disk);
+    });
+    if (rows.some(row => !row.length)) throw new Error("Renkli diskler 3 tahta satırına ayrılamadı. Fotoğrafı döndürüp yeniden deneyin.");
+    centers = rows.map(row => row.reduce((sum, disk) => sum + disk.y, 0) / row.length);
+  }
+  rows = rows.map(row => row.sort((a, b) => a.x - b.x));
+  const rowCenters = rows.map(row => row.reduce((sum, disk) => sum + disk.y, 0) / row.length);
+  if (rowCenters[1] - rowCenters[0] < 35 || rowCenters[2] - rowCenters[1] < 35) throw new Error("Renkli diskler 3 tahta satırına ayrılamadı. Fotoğrafı döndürüp yeniden deneyin.");
+  const rowOptions = rows.map((row, rowIndex) => {
+    const options = columnCombinations(6, row.length).filter(columns => columns.every((column, index) => {
+      const number = BOARD_NUMBERS[rowIndex][column];
+      return DISKS.some(disk => disk.color === row[index].color && disk.number === number);
+    })).map(columns => {
+      const points = row.map((disk, index) => ({ ...disk, column: columns[index] }));
+      return { points };
+    });
+    if (!options.length) throw new Error(`Satır ${rowIndex + 1} renk dizilimi sabit disk setiyle eşleşmedi.`);
+    return options;
+  });
+
+  const combinations = rowOptions[0].flatMap(first => rowOptions[1].flatMap(second => rowOptions[2].map(third => [first, second, third])));
+  const ranked = combinations.map(choice => {
+    const colorNumbers = Object.fromEntries(DETECTABLE_COLORS.map(color => [color, []]));
+    choice.forEach((option, rowIndex) => option.points.forEach(point => colorNumbers[point.color].push(BOARD_NUMBERS[rowIndex][point.column])));
+    if (Object.values(colorNumbers).some(numbers => numbers.length !== 2 || numbers[0] === numbers[1])) return null;
+    const directFits = choice.map(option => option.points.length > 1 ? linearFit(option.points, "x") : null);
+    const slopes = directFits.filter(Boolean).map(fit => fit.slope).filter(slope => slope > 0).sort((a, b) => a - b);
+    if (!slopes.length) return null;
+    const commonSlope = slopes[Math.floor(slopes.length / 2)];
+    const completed = choice.map((option, rowIndex) => {
+      const xFit = directFits[rowIndex] || { slope: commonSlope, intercept: option.points[0].x - commonSlope * option.points[0].column, error: 0 };
+      const yFit = option.points.length > 1 ? linearFit(option.points, "y") : { slope: 0, intercept: option.points[0].y, error: 0 };
+      return { ...option, xFit, yFit };
+    });
+    const leftFit = linearFit(completed.map((option, rowIndex) => ({ column: rowIndex, x: option.xFit.intercept })), "x");
+    const rightFit = linearFit(completed.map((option, rowIndex) => ({ column: rowIndex, x: option.xFit.intercept + option.xFit.slope * 5 })), "x");
+    const spacingPenalty = completed.reduce((sum, option) => sum + ((option.xFit.slope - commonSlope) / commonSlope) ** 2 * 120, 0);
+    const error = completed.reduce((sum, option) => sum + option.xFit.error + option.yFit.error, 0) + leftFit.error + rightFit.error + spacingPenalty;
+    return { completed, error };
+  }).filter(Boolean).sort((a, b) => a.error - b.error);
+  if (!ranked.length) throw new Error("Renkli disklerin hücreleri sabit disk setiyle eşleştirilemedi.");
+  return ranked[0].completed;
+}
+
+function sampleCellBrightness(image, center, radius) {
+  const values = [];
+  for (let y = Math.max(0, Math.floor(center.y - radius * .35)); y <= Math.min(image.height - 1, Math.ceil(center.y + radius * .35)); y += 2) {
+    for (let x = Math.max(0, Math.floor(center.x - radius * .88)); x <= Math.min(image.width - 1, Math.ceil(center.x + radius * .88)); x += 2) {
+      const normalizedX = (x - center.x) / radius;
+      if (Math.abs(normalizedX) < .5 || Math.abs(normalizedX) > .88) continue;
+      const offset = (y * image.width + x) * 4;
+      const red = image.data[offset];
+      const green = image.data[offset + 1];
+      const blue = image.data[offset + 2];
+      values.push(red * .299 + green * .587 + blue * .114);
+    }
+  }
+  values.sort((a, b) => a - b);
+  return values[Math.floor(values.length / 2)] || 0;
+}
+
+function detectPhysicalBoard() {
+  const canvas = $("#physicalPhotoCanvas");
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  const { components, image } = findColoredDiskComponents(context);
+  const fittedRows = mapColoredDisksToGrid(components);
+  const centers = fittedRows.flatMap((row, rowIndex) => Array.from({ length: 6 }, (_, column) => ({
+    index: rowIndex * 6 + column,
+    row: rowIndex,
+    column,
+    number: BOARD_NUMBERS[rowIndex][column],
+    x: row.xFit.intercept + row.xFit.slope * column,
+    y: row.yFit.intercept + row.yFit.slope * column,
+    radius: Math.abs(row.xFit.slope) * .42
+  })));
+  const assignments = Array(18).fill(null);
+  const confidences = Array(18).fill(.82);
+  fittedRows.forEach((row, rowIndex) => row.points.forEach(point => {
+    const index = rowIndex * 6 + point.column;
+    assignments[index] = DISKS.find(disk => disk.color === point.color && disk.number === cellNumber(index));
+    confidences[index] = .95;
+  }));
+
+  for (let number = 1; number <= 6; number += 1) {
+    const numberCells = centers.filter(center => center.number === number && !assignments[center.index]);
+    const usedColors = new Set(assignments.filter(disk => disk?.number === number).map(disk => disk.color));
+    const remaining = DISKS.filter(disk => disk.number === number && !usedColors.has(disk.color));
+    if (numberCells.length !== remaining.length) throw new Error(`${number} numaralı diskler tekil olarak eşleştirilemedi.`);
+    if (numberCells.length === 1) {
+      assignments[numberCells[0].index] = remaining[0];
+      continue;
+    }
+    const cellsByBrightness = numberCells.map(center => ({ center, brightness: sampleCellBrightness(image, center, center.radius) })).sort((a, b) => a.brightness - b.brightness);
+    const disksByBrightness = [...remaining].sort((a, b) => ({ Siyah: 0, Gri: 1, Beyaz: 2 }[a.color] ?? 3) - ({ Siyah: 0, Gri: 1, Beyaz: 2 }[b.color] ?? 3));
+    cellsByBrightness.forEach((item, index) => {
+      assignments[item.center.index] = disksByBrightness[index];
+      confidences[item.center.index] = Math.abs(cellsByBrightness[0].brightness - cellsByBrightness.at(-1).brightness) > 18 ? .72 : .28;
+    });
+  }
+  if (assignments.some(disk => !disk)) throw new Error("Bazı diskler sabit disk setiyle eşleştirilemedi.");
+  return {
+    shapes: assignments.map(disk => disk.shape),
+    confidences,
+    detections: centers.map(center => ({ ...center, color: assignments[center.index].color, shape: assignments[center.index].shape }))
+  };
+}
+
+async function analyzePhysicalPhoto() {
+  if (!physicalScoreState.photoUrl || physicalScoreState.analyzing) return;
+  physicalScoreState.analyzing = true;
+  physicalScoreState.detections = [];
+  drawPhysicalPhotoCanvas(false);
+  $("#photoAnalysisOverlay").classList.remove("hidden");
+  setPhysicalAnalysisStatus("working", "Analiz ediliyor", "18 disk ve renkleri cihazınızda aranıyor…");
+  try {
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const result = detectPhysicalBoard();
+    physicalScoreState.shapes = result.shapes;
+    physicalScoreState.detectionConfidence = result.confidences;
+    physicalScoreState.detections = result.detections;
+    physicalScoreState.complete = result.shapes.every(Boolean);
+    physicalScoreState.selectedCell = null;
+    const uncertain = result.confidences.filter(confidence => confidence < .34).length;
+    renderPhysicalScore();
+    drawPhysicalPhotoCanvas(true);
+    setPhysicalAnalysisStatus(
+      uncertain ? "warning" : "success",
+      "18 / 18 disk okundu",
+      uncertain ? `${uncertain} okuma mor renkle işaretlendi; puanı onaylamadan önce kontrol edin.` : "Tüm şekiller bulundu ve puanlar otomatik hesaplandı."
+    );
+    showToast("Fotoğraf otomatik okundu, puanlar hazır.");
+  } catch (error) {
+    physicalScoreState.detections = [];
+    physicalScoreState.detectionConfidence = Array(18).fill(null);
+    drawPhysicalPhotoCanvas(false);
+    setPhysicalAnalysisStatus("warning", "Otomatik okuma tamamlanamadı", error.message || "Fotoğrafı düzeltip yeniden deneyin.");
+    showToast("Tahta net okunamadı; fotoğrafı döndürüp yeniden tarayın.");
+  } finally {
+    physicalScoreState.analyzing = false;
+    $("#photoAnalysisOverlay").classList.add("hidden");
+  }
+}
+
 function clearPhysicalPhoto() {
   if (physicalScoreState.photoUrl) URL.revokeObjectURL(physicalScoreState.photoUrl);
   physicalScoreState.photoUrl = null;
   physicalScoreState.rotation = 0;
+  physicalScoreState.detections = [];
+  physicalScoreState.detectionConfidence = Array(18).fill(null);
   $("#physicalPhotoInput").value = "";
   $("#physicalPhoto").removeAttribute("src");
+  const canvas = $("#physicalPhotoCanvas");
+  canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
   $("#photoPreview").classList.add("hidden");
   $("#photoDropzone").classList.remove("hidden");
+  setPhysicalAnalysisStatus("idle", "Hazır", "Tahtayı yukarıdan, 18 diskin tamamı görünecek şekilde çekin.");
 }
 
-function loadPhysicalPhoto(file) {
+async function loadPhysicalPhoto(file) {
   if (!file) return;
   if (!file.type.startsWith("image/")) return showToast("Lütfen bir görsel dosyası seçin.");
   if (file.size > 20 * 1024 * 1024) return showToast("Fotoğraf 20 MB’den küçük olmalı.");
   if (physicalScoreState.photoUrl) URL.revokeObjectURL(physicalScoreState.photoUrl);
   physicalScoreState.photoUrl = URL.createObjectURL(file);
   physicalScoreState.rotation = 0;
+  physicalScoreState.detections = [];
+  physicalScoreState.detectionConfidence = Array(18).fill(null);
   const image = $("#physicalPhoto");
   image.src = physicalScoreState.photoUrl;
-  image.style.transform = "rotate(0deg)";
   $("#photoDropzone").classList.add("hidden");
   $("#photoPreview").classList.remove("hidden");
+  try {
+    await image.decode();
+  } catch (_) {
+    await new Promise(resolve => image.addEventListener("load", resolve, { once: true }));
+  }
+  drawPhysicalPhotoCanvas(false);
+  analyzePhysicalPhoto();
 }
 
 function rotatePhysicalPhoto(delta) {
   physicalScoreState.rotation = (physicalScoreState.rotation + delta + 360) % 360;
-  $("#physicalPhoto").style.transform = `rotate(${physicalScoreState.rotation}deg)`;
+  physicalScoreState.detections = [];
+  physicalScoreState.detectionConfidence = Array(18).fill(null);
+  drawPhysicalPhotoCanvas(false);
+  analyzePhysicalPhoto();
 }
 
 function resetPhysicalScore() {
   physicalScoreState.shapes = Array(18).fill(null);
+  physicalScoreState.detectionConfidence = Array(18).fill(null);
+  physicalScoreState.detections = [];
   physicalScoreState.selectedCell = null;
   physicalScoreState.complete = true;
   clearPhysicalPhoto();
@@ -641,6 +984,7 @@ $("#physicalComplete").addEventListener("change", event => {
 $("#physicalPhotoInput").addEventListener("change", event => loadPhysicalPhoto(event.target.files[0]));
 $("#rotatePhotoLeft").addEventListener("click", () => rotatePhysicalPhoto(-90));
 $("#rotatePhotoRight").addEventListener("click", () => rotatePhysicalPhoto(90));
+$("#analyzePhysicalPhoto").addEventListener("click", analyzePhysicalPhoto);
 $("#removePhoto").addEventListener("click", clearPhysicalPhoto);
 $("#resetPhysicalScore").addEventListener("click", resetPhysicalScore);
 $("#copyPhysicalResult").addEventListener("click", copyPhysicalResult);

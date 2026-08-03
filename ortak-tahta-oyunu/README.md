@@ -47,7 +47,13 @@ bir puan formu açar:
 
 - Telefon kamerasından fotoğraf çekilebilir veya cihazdan JPG/PNG/WEBP seçilebilir.
 - Fotoğraf hiçbir sunucuya gönderilmez; yalnızca açık tarayıcı sekmesinde tutulur.
-- A/B hücrelerine fotoğrafta görülen şekil girildiğinde Senaryo 1/2 puanları
-  anında hesaplanır. N hücrelerini girmek gerekmez.
+- Tarayıcı, 12 renkli diski görüntüden bulur; sabit numara–renk setini
+  kullanarak 18 diskin şeklini ve hücresini otomatik çıkarır.
+- Algılanan diskler fotoğraf üzerinde işaretlenir ve Senaryo 1/2 puanları
+  anında hesaplanır. Düşük güvenli sonuçlar mor renkle gösterilir.
+- Gerekirse yalnızca hatalı A/B hücresine dokunup şekli düzeltmek mümkündür;
+  normal akışta elle veri girişi gerekmez.
+- En iyi sonuç için 18 diskin tamamını kadraja alın, tahtayı dik tutun ve
+  yansımayı azaltın.
 - Tahta tamamlanma durumu ortak +20 bonusunu açıp kapatır.
 - Sonuç panoya kopyalanabilir.
