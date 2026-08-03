@@ -39,3 +39,15 @@ Bu deponun GitHub Pages adresi etkinleştirildiğinde oyun şu adreste açılır
 - **Takas yap** ile iki elden birer disk seçin; en fazla 6 takas yapılabilir.
 - Gizli kitapçık kartına basarak hedefi açıp kapatın.
 - Oyun tarayıcıda otomatik kaydedilir.
+
+## Fiziksel oturumu fotoğraftan puanlama
+
+Üst menüdeki **Fotoğraftan puanla** düğmesi fiziksel masa oturumları için ayrı
+bir puan formu açar:
+
+- Telefon kamerasından fotoğraf çekilebilir veya cihazdan JPG/PNG/WEBP seçilebilir.
+- Fotoğraf hiçbir sunucuya gönderilmez; yalnızca açık tarayıcı sekmesinde tutulur.
+- A/B hücrelerine fotoğrafta görülen şekil girildiğinde Senaryo 1/2 puanları
+  anında hesaplanır. N hücrelerini girmek gerekmez.
+- Tahta tamamlanma durumu ortak +20 bonusunu açıp kapatır.
+- Sonuç panoya kopyalanabilir.

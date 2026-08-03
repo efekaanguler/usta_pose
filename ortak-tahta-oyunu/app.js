@@ -47,6 +47,16 @@ let setupScenario = 1;
 let tradeSelection = { P1: null, P2: null };
 let toastTimer = null;
 let audioContext = null;
+let physicalScoreState = {
+  initialized: false,
+  scenario: 1,
+  names: { P1: "Oyuncu 1", P2: "Oyuncu 2" },
+  shapes: Array(18).fill(null),
+  selectedCell: null,
+  complete: true,
+  photoUrl: null,
+  rotation: 0
+};
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
@@ -362,6 +372,175 @@ function openScore(forceReveal = false) {
   if (forceReveal) sound("finish");
 }
 
+function targetsForScenario(scenario) {
+  return scenario === 1
+    ? { P1: "circles", P2: "polygons" }
+    : { P1: "polygons", P2: "circles" };
+}
+
+function physicalSpecialOwner(type) {
+  const targets = targetsForScenario(physicalScoreState.scenario);
+  return Object.keys(targets).find(player => TARGETS[targets[player]].cell === type);
+}
+
+function physicalTargetScore(player) {
+  const targetKey = targetsForScenario(physicalScoreState.scenario)[player];
+  const target = TARGETS[targetKey];
+  return physicalScoreState.shapes.reduce((total, shape, index) => {
+    if (!shape) return total;
+    const row = Math.floor(index / 6);
+    if (BOARD_TYPES[row][index % 6] !== target.cell) return total;
+    if (shape === target.primary) return total + target.primaryPoints;
+    if (shape === target.secondary) return total + target.secondaryPoints;
+    return total;
+  }, 0);
+}
+
+function renderPhysicalBoard() {
+  $("#physicalBoard").innerHTML = physicalScoreState.shapes.map((shape, index) => {
+    const row = Math.floor(index / 6);
+    const type = BOARD_TYPES[row][index % 6];
+    const number = cellNumber(index);
+    const scoreable = type !== "N";
+    const special = SPECIAL_CELLS[index];
+    const owner = special ? physicalSpecialOwner(type) : null;
+    const specialSeal = special ? `<span class="physical-special-seal ${owner.toLowerCase()}">Ö${owner}</span>` : "";
+    const shapeContent = shape
+      ? `<span class="physical-cell-shape"><strong>${SHAPE_ICONS[shape]}</strong><small>${shape}</small></span>`
+      : scoreable ? `<span class="physical-cell-shape physical-cell-empty">＋</span>` : "";
+    return `<button class="physical-cell type-${type}${shape ? " assigned" : ""}${physicalScoreState.selectedCell === index ? " selected" : ""}" data-physical-cell="${index}" type="button" ${scoreable ? "" : "disabled"} aria-label="${number}${type}${shape ? `, ${shape}` : scoreable ? ", şekil seçilmedi" : ", nötr"}"><span class="physical-cell-meta"><b>${number}</b><small>${type}</small></span>${specialSeal}${shapeContent}</button>`;
+  }).join("");
+}
+
+function renderPhysicalShapePicker() {
+  const picker = $("#physicalShapePicker");
+  const index = physicalScoreState.selectedCell;
+  if (index === null) {
+    picker.innerHTML = "<span>Önce bir A/B hücresi seçin.</span>";
+    return;
+  }
+  const row = Math.floor(index / 6);
+  const label = `${cellNumber(index)}${BOARD_TYPES[row][index % 6]}`;
+  picker.innerHTML = `<span><b>${label}</b></span>${Object.keys(SHAPE_ICONS).map(shape => `<button class="shape-option" data-physical-shape="${shape}" type="button" aria-label="${label} için ${shape} seç"><b>${SHAPE_ICONS[shape]}</b><small>${shape}</small></button>`).join("")}<button class="shape-option clear" data-physical-shape="" type="button">Temizle</button>`;
+}
+
+function renderPhysicalResult() {
+  const scoreableCount = BOARD_TYPES.flat().filter(type => type !== "N").length;
+  const assignedCount = physicalScoreState.shapes.filter((shape, index) => {
+    const row = Math.floor(index / 6);
+    return shape && BOARD_TYPES[row][index % 6] !== "N";
+  }).length;
+  const p1Target = physicalTargetScore("P1");
+  const p2Target = physicalTargetScore("P2");
+  const bonus = physicalScoreState.complete ? 20 : 0;
+  $("#physicalProgress").textContent = `${assignedCount} / ${scoreableCount} işlendi`;
+  $("#physicalNameP1").textContent = physicalScoreState.names.P1;
+  $("#physicalNameP2").textContent = physicalScoreState.names.P2;
+  $("#physicalScoreP1").textContent = p1Target + bonus;
+  $("#physicalScoreP2").textContent = p2Target + bonus;
+  $("#physicalDetailP1").textContent = `Hedef ${p1Target}${bonus ? " + ortak 20" : ""}`;
+  $("#physicalDetailP2").textContent = `Hedef ${p2Target}${bonus ? " + ortak 20" : ""}`;
+}
+
+function renderPhysicalScore() {
+  $("#physicalScenario").value = String(physicalScoreState.scenario);
+  $("#physicalP1Name").value = physicalScoreState.names.P1;
+  $("#physicalP2Name").value = physicalScoreState.names.P2;
+  $("#physicalComplete").checked = physicalScoreState.complete;
+  renderPhysicalBoard();
+  renderPhysicalShapePicker();
+  renderPhysicalResult();
+}
+
+function openPhysicalScore() {
+  if (!physicalScoreState.initialized) {
+    physicalScoreState.scenario = state?.scenario || setupScenario;
+    physicalScoreState.names = state
+      ? { ...state.names }
+      : {
+          P1: $("#p1Name").value.trim() || "Oyuncu 1",
+          P2: $("#p2Name").value.trim() || "Oyuncu 2"
+        };
+    physicalScoreState.initialized = true;
+  }
+  renderPhysicalScore();
+  const dialog = $("#physicalScoreDialog");
+  dialog.showModal();
+  dialog.scrollTop = 0;
+}
+
+function selectPhysicalShape(shape) {
+  const index = physicalScoreState.selectedCell;
+  if (index === null) return;
+  physicalScoreState.shapes[index] = shape || null;
+  if (shape) {
+    const scoreableCells = physicalScoreState.shapes
+      .map((_, cellIndex) => cellIndex)
+      .filter(cellIndex => BOARD_TYPES[Math.floor(cellIndex / 6)][cellIndex % 6] !== "N");
+    const currentPosition = scoreableCells.indexOf(index);
+    const orderedNext = scoreableCells.slice(currentPosition + 1).concat(scoreableCells.slice(0, currentPosition));
+    physicalScoreState.selectedCell = orderedNext.find(cellIndex => !physicalScoreState.shapes[cellIndex]) ?? index;
+  }
+  renderPhysicalScore();
+}
+
+function clearPhysicalPhoto() {
+  if (physicalScoreState.photoUrl) URL.revokeObjectURL(physicalScoreState.photoUrl);
+  physicalScoreState.photoUrl = null;
+  physicalScoreState.rotation = 0;
+  $("#physicalPhotoInput").value = "";
+  $("#physicalPhoto").removeAttribute("src");
+  $("#photoPreview").classList.add("hidden");
+  $("#photoDropzone").classList.remove("hidden");
+}
+
+function loadPhysicalPhoto(file) {
+  if (!file) return;
+  if (!file.type.startsWith("image/")) return showToast("Lütfen bir görsel dosyası seçin.");
+  if (file.size > 20 * 1024 * 1024) return showToast("Fotoğraf 20 MB’den küçük olmalı.");
+  if (physicalScoreState.photoUrl) URL.revokeObjectURL(physicalScoreState.photoUrl);
+  physicalScoreState.photoUrl = URL.createObjectURL(file);
+  physicalScoreState.rotation = 0;
+  const image = $("#physicalPhoto");
+  image.src = physicalScoreState.photoUrl;
+  image.style.transform = "rotate(0deg)";
+  $("#photoDropzone").classList.add("hidden");
+  $("#photoPreview").classList.remove("hidden");
+}
+
+function rotatePhysicalPhoto(delta) {
+  physicalScoreState.rotation = (physicalScoreState.rotation + delta + 360) % 360;
+  $("#physicalPhoto").style.transform = `rotate(${physicalScoreState.rotation}deg)`;
+}
+
+function resetPhysicalScore() {
+  physicalScoreState.shapes = Array(18).fill(null);
+  physicalScoreState.selectedCell = null;
+  physicalScoreState.complete = true;
+  clearPhysicalPhoto();
+  renderPhysicalScore();
+  showToast("Fiziksel puan formu temizlendi.");
+}
+
+async function copyPhysicalResult() {
+  const p1Target = physicalTargetScore("P1");
+  const p2Target = physicalTargetScore("P2");
+  const bonus = physicalScoreState.complete ? 20 : 0;
+  const assigned = physicalScoreState.shapes.filter(Boolean).length;
+  const text = `USTA fiziksel oturum · Senaryo ${physicalScoreState.scenario}\n${physicalScoreState.names.P1}: ${p1Target + bonus} (hedef ${p1Target}${bonus ? " + ortak 20" : ""})\n${physicalScoreState.names.P2}: ${p2Target + bonus} (hedef ${p2Target}${bonus ? " + ortak 20" : ""})\nİşlenen bonus hücresi: ${assigned}/12`;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (_) {
+    const area = document.createElement("textarea");
+    area.value = text;
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  }
+  showToast("Puan özeti kopyalandı.");
+}
+
 function startGame(useSaved = false) {
   if (useSaved) {
     state = loadSavedState();
@@ -431,12 +610,64 @@ $$('[data-scenario]').forEach(button => button.addEventListener("click", () => {
 
 $("#startButton").addEventListener("click", () => startGame(false));
 $("#resumeButton").addEventListener("click", () => startGame(true));
+$("#physicalScoreButton").addEventListener("click", openPhysicalScore);
 $("#rulesButton").addEventListener("click", () => $("#rulesDialog").showModal());
 $("#tradeButton").addEventListener("click", openTrade);
 $("#confirmTrade").addEventListener("click", confirmTrade);
 $("#undoButton").addEventListener("click", undo);
 $("#scoreButton").addEventListener("click", () => openScore(false));
 $("#newGameButton").addEventListener("click", newGame);
+
+$("#physicalScenario").addEventListener("change", event => {
+  physicalScoreState.scenario = Number(event.target.value);
+  renderPhysicalScore();
+});
+
+$("#physicalP1Name").addEventListener("input", event => {
+  physicalScoreState.names.P1 = event.target.value.trim() || "Oyuncu 1";
+  renderPhysicalResult();
+});
+
+$("#physicalP2Name").addEventListener("input", event => {
+  physicalScoreState.names.P2 = event.target.value.trim() || "Oyuncu 2";
+  renderPhysicalResult();
+});
+
+$("#physicalComplete").addEventListener("change", event => {
+  physicalScoreState.complete = event.target.checked;
+  renderPhysicalResult();
+});
+
+$("#physicalPhotoInput").addEventListener("change", event => loadPhysicalPhoto(event.target.files[0]));
+$("#rotatePhotoLeft").addEventListener("click", () => rotatePhysicalPhoto(-90));
+$("#rotatePhotoRight").addEventListener("click", () => rotatePhysicalPhoto(90));
+$("#removePhoto").addEventListener("click", clearPhysicalPhoto);
+$("#resetPhysicalScore").addEventListener("click", resetPhysicalScore);
+$("#copyPhysicalResult").addEventListener("click", copyPhysicalResult);
+
+$("#physicalBoard").addEventListener("click", event => {
+  const cell = event.target.closest("[data-physical-cell]");
+  if (!cell || cell.disabled) return;
+  physicalScoreState.selectedCell = Number(cell.dataset.physicalCell);
+  renderPhysicalScore();
+});
+
+$("#physicalShapePicker").addEventListener("click", event => {
+  const option = event.target.closest("[data-physical-shape]");
+  if (!option) return;
+  selectPhysicalShape(option.dataset.physicalShape);
+});
+
+const photoDropzone = $("#photoDropzone");
+["dragenter", "dragover"].forEach(eventName => photoDropzone.addEventListener(eventName, event => {
+  event.preventDefault();
+  photoDropzone.classList.add("dragover");
+}));
+["dragleave", "drop"].forEach(eventName => photoDropzone.addEventListener(eventName, event => {
+  event.preventDefault();
+  photoDropzone.classList.remove("dragover");
+}));
+photoDropzone.addEventListener("drop", event => loadPhysicalPhoto(event.dataTransfer.files[0]));
 
 $("#soundButton").addEventListener("click", event => {
   if (!state) return;
